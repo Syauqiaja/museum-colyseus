@@ -11,7 +11,7 @@ hostnames, one box:
 
 | Hostname | Serves | Backed by |
 |---|---|---|
-| `museum.fajrsyauqi.com` | Unity WebGL build | nginx static, `/var/www/museum-client` |
+| `museum.fajrsyauqi.com` | Unity WebGL build | nginx static, `/var/www/museum` |
 | `api.museum.fajrsyauqi.com` | Colyseus | nginx → `127.0.0.1:2567` |
 
 The apex `fajrsyauqi.com` is deliberately left free for anything else. DNS setup
@@ -20,8 +20,12 @@ under [Hostnames](#hostnames).
 Why two hostnames rather than one host with the game server on a subpath: the
 JS SDK accepts a `pathname`, but the **Unity C# SDK builds its endpoint from
 host + port only**, so a subpath means patching the SDK. A second subdomain is
-free. Cross-origin is a non-issue — Colyseus's matchmaker replies with
-`Access-Control-Allow-Origin: *` by default.
+free. Cross-origin is a non-issue — Colyseus's matchmaker sets its own CORS
+headers, see [CORS](#cors--leave-it-to-colyseus).
+
+This doc is the reasoning; [`deploy/README.md`](../deploy/README.md) is the
+step-by-step runbook, and [`deploy/`](../deploy/) holds the actual config and
+install script. Keep the two in sync.
 
 ## What actually runs
 
@@ -131,7 +135,7 @@ The Unity project lives elsewhere; only its **build output** lands here. In Unit
 a `Build/` subfolder. Ship that folder to the VPS:
 
 ```bash
-rsync -av --delete path/to/WebGLBuild/ user@vps:/var/www/museum-client/
+rsync -av --delete path/to/WebGLBuild/ user@vps:/var/www/museum/
 ```
 
 Two Unity build settings decide how much nginx configuration you need
@@ -142,8 +146,11 @@ Two Unity build settings decide how much nginx configuration you need
 - **Compression Format: Gzip or Brotli** with *Decompression Fallback* **off** —
   files are `.wasm.br`, `.js.br`, `.data.br`. Much smaller, but nginx must return
   them with the right `Content-Encoding`, otherwise the loader fails with
-  "Unable to parse Build/*.wasm" or an unhandled-compression error. The
-  `location` blocks below cover this.
+  "Unable to parse Build/*.wasm" or an unhandled-compression error.
+
+Leaving *Decompression Fallback* on instead produces `*.unityweb` filenames. The
+shipped nginx config handles all three layouts, so no server-side change is
+needed whichever you pick.
 
 Leaving *Decompression Fallback* **on** makes the build work on any server
 without configuration, at the cost of a bigger loader and slower start — fine as
@@ -151,90 +158,64 @@ a first deploy, worth turning off once the nginx side is proven.
 
 ## nginx + TLS
 
-One nginx, two server blocks. For the game server, the WebSocket upgrade headers
-and a long read timeout are the parts that matter — the default 60s
-`proxy_read_timeout` will cut idle lobbies.
+The site config is a file in this repo — [`deploy/nginx/museum.fajrsyauqi.com.conf`](../deploy/nginx/museum.fajrsyauqi.com.conf) —
+not something to hand-write on the box, so that fixes to it are versioned. It
+carries explicit 443 blocks, the WebSocket upgrade plumbing, the long
+`proxy_read_timeout` that idle lobbies need, basic-auth on `/monitor`, and the
+`Content-Encoding` rules for every Unity compression layout.
 
-```nginx
-# /etc/nginx/conf.d/museum.conf
-
-# --- Unity WebGL client -----------------------------------------------------
-server {
-    listen 443 ssl http2;
-    server_name museum.fajrsyauqi.com;
-
-    ssl_certificate     /etc/letsencrypt/live/museum.fajrsyauqi.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/museum.fajrsyauqi.com/privkey.pem;
-
-    root /var/www/museum-client;
-    index index.html;
-
-    types { application/wasm wasm; }
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # Pre-compressed Unity build files: serve as-is, tell the browser how.
-    # Only needed when Compression Format is Brotli/Gzip with fallback off.
-    location ~ \.wasm\.br$ { add_header Content-Encoding br;   default_type application/wasm; }
-    location ~ \.js\.br$   { add_header Content-Encoding br;   default_type application/javascript; }
-    location ~ \.br$       { add_header Content-Encoding br;   default_type application/octet-stream; }
-    location ~ \.wasm\.gz$ { add_header Content-Encoding gzip; default_type application/wasm; }
-    location ~ \.js\.gz$   { add_header Content-Encoding gzip; default_type application/javascript; }
-    location ~ \.gz$       { add_header Content-Encoding gzip; default_type application/octet-stream; }
-
-    # The build hashes its filenames; index.html must not be cached.
-    location = /index.html { add_header Cache-Control "no-store"; }
-    location /Build/      { expires 1y; add_header Cache-Control "public, immutable"; }
-}
-
-# --- Colyseus game server ---------------------------------------------------
-server {
-    listen 443 ssl http2;
-    server_name api.museum.fajrsyauqi.com;
-
-    ssl_certificate     /etc/letsencrypt/live/museum.fajrsyauqi.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/museum.fajrsyauqi.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:2567;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 3600s;
-    }
-}
-```
-
-One certificate covers both names:
+Certificate first, config second:
 
 ```bash
-certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
+sudo certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
+
+sudo mkdir -p /var/www/museum
+sudo cp deploy/nginx/museum.fajrsyauqi.com.conf /etc/nginx/sites-available/
+sudo ln -s ../sites-available/museum.fajrsyauqi.com.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-(with `-d museum.fajrsyauqi.com` first, so `/etc/letsencrypt/live/museum.fajrsyauqi.com/`
-is the path both blocks reference above). `--nginx` also adds the port-80
-`server` blocks that redirect plain HTTP to HTTPS, so
-`http://museum.fajrsyauqi.com` lands on the secure page — don't hand-write those.
-Renewal is the certbot systemd timer installed with the package; confirm with
-`certbot renew --dry-run`, and note that renewal reloads nginx, not the game
-server, so live matches are unaffected.
+Put `museum.fajrsyauqi.com` first in the certbot command — that name decides the
+`/etc/letsencrypt/live/<name>/` directory the config points at. One certificate
+covers both hostnames.
+
+Two traps this box has already sprung, both written up in
+[`deploy/README.md`](../deploy/README.md) §5:
+
+- **Certbot writes into whatever block already matches.** This VPS also hosts
+  `qurantv_webrtc`, which owns `listen 80 default_server` / `server_name _`.
+  Running `certbot --nginx` before the museum site existed injected museum server
+  blocks into *that* project's config. Install the site config first, or check
+  that file afterwards.
+- **Do not re-run `certbot --nginx` once the site is installed** — it appends
+  duplicate 443 blocks. Automatic renewal (`certbot renew`, the systemd timer)
+  only replaces certificate files and never edits configs, so it is safe; it
+  reloads nginx, not the game server, leaving live matches alone.
 
 The Unity client's production endpoint is then `wss://api.museum.fajrsyauqi.com` —
 see [unity-integration.md](unity-integration.md) §2.
 
+## CORS — leave it to Colyseus
+
+`@colyseus/core`'s router already attaches `Access-Control-Allow-Origin` (the
+request's own Origin by default) plus the other `Access-Control-*` headers to
+every matchmaking response and OPTIONS preflight — see
+`DEFAULT_CORS_HEADERS` / `getCorsHeaders` in its `matchmaker/controller.ts` and
+`router/node.ts`. Adding the same headers at the nginx layer sends **two** of
+each, which browsers reject with "contains multiple values", breaking
+`joinOrCreate` in the browser while it still works in the Unity Editor.
+
+To restrict which origin may matchmake, override
+`matchMaker.controller.getCorsHeaders` in `src/app.config.ts`. Never in nginx.
+
 ## Exposed routes — check before going public
 
-- `/monitor` — the Colyseus admin panel, mounted **unconditionally** in
-  [`src/app.config.ts`](../src/app.config.ts). It lists live rooms and lets an
-  operator inspect and kill them. It has no password. Before the server is
-  reachable from the internet, either put HTTP basic auth on it
-  (`monitor()` accepts credentials, or restrict the location block in nginx) or
-  block `/monitor` at the proxy.
+- `/monitor` — the Colyseus admin panel: it lists live rooms and lets an operator
+  inspect and destroy them. **Two locks, both needed.** Server-side it is only
+  mounted when `MONITOR_ENABLED=1` (see [`src/app.config.ts`](../src/app.config.ts)),
+  and the nginx config puts HTTP basic auth in front of it
+  (`sudo htpasswd -c /etc/nginx/.htpasswd-museum admin`). Leave `MONITOR_ENABLED`
+  unset unless you actually need the panel.
 - `/playground` — dev tooling, already gated behind `NODE_ENV !== "production"`.
 - `/api/hello`, `/hi` — scaffold leftovers, harmless.
 

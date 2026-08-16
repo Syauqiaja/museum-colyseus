@@ -96,18 +96,47 @@ pm2 logs colyseus-app --lines 50
 
 ## 5. Nginx + TLS
 
+Order matters: **certificate first, site config second.** The config ships with
+explicit 443 blocks pointing at the cert, so certbot never needs to rewrite it.
+
 ```bash
+sudo certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
+
 sudo mkdir -p /var/www/museum
 sudo cp deploy/nginx/museum.fajrsyauqi.com.conf /etc/nginx/sites-available/
 sudo ln -s ../sites-available/museum.fajrsyauqi.com.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-
-sudo certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
 ```
 
-Certbot rewrites both server blocks in place, adding the 443 listeners and an
-http→https redirect. Renewal is installed as a systemd timer; confirm with
-`sudo certbot renew --dry-run`.
+`$connection_upgrade` may only be defined once across all enabled sites — if
+another site already defines it, `nginx -t` fails with "duplicate map" and you
+delete the `map` block from the museum config. Check with
+`grep -rn connection_upgrade /etc/nginx/`.
+
+Renewal is a systemd timer installed with the certbot package; confirm with
+`sudo certbot renew --dry-run`. Renewal replaces the certificate files only and
+never edits site configs, so it is safe. Do **not** re-run `certbot --nginx`
+after the site is installed — it appends duplicate 443 server blocks.
+
+### This VPS is shared with `qurantv_webrtc`
+
+Two consequences, both already hit once:
+
+- `qurantv_webrtc` holds `listen 80 default_server` and `server_name _`, so it
+  catches every hostname without an explicit block. When certbot ran *before*
+  this site existed, it injected `museum.fajrsyauqi.com` /
+  `api.museum.fajrsyauqi.com` server blocks into
+  `/etc/nginx/sites-available/qurantv_webrtc` — serving the QuranTV site on the
+  museum hostnames. Those cloned blocks were removed by hand. If you ever re-run
+  `certbot --nginx` while the museum site is disabled, check that file again.
+- `$connection_upgrade` may only be defined once across all enabled sites. The
+  install script warns if another site already defines it; the map block in the
+  museum config is the one to delete in that case.
+
+```bash
+grep -rn connection_upgrade /etc/nginx/
+sudo grep -n server_name /etc/nginx/sites-available/qurantv_webrtc   # should list only _ and the nip.io name
+```
 
 If you want the monitor panel, create its password file:
 
@@ -135,10 +164,17 @@ Upload:
 rsync -avz --delete Builds/WebGL/ <user>@<VPS_IP>:/var/www/museum/
 ```
 
-The Nginx config declares `Content-Encoding: br` on the `*.unityweb` files.
+The Nginx config declares the right `Content-Encoding` for both Unity naming
+schemes — `*.unityweb` (Decompression Fallback ON) and `*.br` / `*.gz`
+(fallback OFF) — so either build setting works without touching nginx.
 Brotli-compressed builds served without those headers fail with
-`Unable to parse Build/WebGL.data.unityweb` — if you switch the build to Gzip,
-change `br` to `gzip` in the config to match.
+`Unable to parse Build/WebGL.data.unityweb`, or hang on the progress bar.
+
+Check a build file's headers after uploading:
+
+```bash
+curl -sI https://museum.fajrsyauqi.com/Build/WebGL.wasm.br | grep -i "content-encoding\|content-type"
+```
 
 ## 7. Smoke test
 
@@ -168,3 +204,9 @@ Client: rebuild in Unity, rsync again. `index.html` is sent `no-cache` and the
   as health checks; delete them if you'd rather not expose them.
 - **No LAN fallback yet.** For a venue with unreliable internet, the same build
   runs against a local server; that's a separate setup (see docs/dev-plan.md §6b).
+- **CORS is Colyseus's job, not nginx's.** `@colyseus/core`'s router attaches
+  `Access-Control-Allow-Origin` (defaulting to the request Origin) to every
+  matchmaking response and preflight. Adding the same headers in nginx sends two
+  of each and browsers reject the request. To lock the origin down, override
+  `matchMaker.controller.getCorsHeaders` in `src/app.config.ts`.
+- **Shared box.** `qurantv_webrtc` owns `default_server`; see §5.
