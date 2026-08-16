@@ -23,6 +23,46 @@ using Colyseus;
 var client = new ColyseusClient(serverUrl); // "ws://localhost:2567" or "wss://api.museum.fajrsyauqi.com"
 ```
 
+## 2b. Deployed server — facts for the client project
+
+The backend is live. Everything below is verified against the running server, not
+planned:
+
+| Thing | Value |
+|---|---|
+| WebSocket endpoint | `wss://api.museum.fajrsyauqi.com` |
+| Client is served from | `https://museum.fajrsyauqi.com` (same VPS, `/var/www/museum`) |
+| Registered room names | `dakon` (2 seats), `egrang` (3 seats, lobby only — race not implemented) |
+| Room code | 6 chars, alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I/L/O/0/1) |
+| Join options | `{ private?: bool, displayName?: string (≤32 chars), playerId?: string }` |
+| Start | host sends `start_game`; also auto-starts when the room fills |
+| Reconnect window | 30 seconds (`allowReconnection`) |
+| Idle room timeout | 5 minutes |
+| TLS | Let's Encrypt, auto-renewing |
+| CORS | handled by Colyseus; cross-origin from the client host works as-is |
+
+`engklak` is **not** registered on the server — only `dakon` and `egrang` exist
+today. Don't ship a menu entry that tries to join it.
+
+Health checks the client project can hit directly:
+
+```bash
+curl -s https://api.museum.fajrsyauqi.com/hi
+curl -s -X POST https://api.museum.fajrsyauqi.com/matchmake/joinOrCreate/dakon \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Build and upload:
+
+- Build WebGL with the endpoint constant pointing at `wss://api.museum.fajrsyauqi.com`
+  (not a subpath of the client host — the Unity SDK has no path setting).
+- Any compression setting works: nginx serves `*.unityweb`, `*.br` and `*.gz`
+  with the correct `Content-Encoding`.
+- Upload replaces the whole webroot:
+  `rsync -avz --delete <BuildFolder>/ ubuntu@101.32.239.188:/var/www/museum/`
+- `index.html` is sent `no-cache` and `Build/` is immutable-cached, so a redeploy
+  takes effect on the next load without a hard refresh.
+
 ## 3. Exhibition Museum scene
 
 No Colyseus connection at all — this scene is single-player/client-side only (see [overview.md](overview.md)). Don't instantiate a `ColyseusClient` here; only the 3 minigame scenes need one.
