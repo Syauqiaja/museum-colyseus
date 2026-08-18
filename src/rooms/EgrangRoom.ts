@@ -16,7 +16,9 @@ import { seatLeft } from "../db/sessions.js";
  * `onGameStart` fires — so a stilt chosen while waiting survives into the race.
  * `onGameStart` also reconciles `racers` against the still-seated players (a
  * choice made by someone who then left before the race started must not leave a
- * ghost row behind) and arms the countdown.
+ * ghost row behind), arms the countdown and broadcasts it. Clients render that
+ * countdown as the stilt-picking window; `countdown_sync` re-serves it to anyone
+ * who joined the room's message stream after the broadcast went out.
  *
  * A stilt may be chosen while `waiting`, and it stays choosable into `in_progress`
  * right up until that racer's first accepted step: the room fills and auto-starts
@@ -31,8 +33,16 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
   maxClients = 3;
   protected minPlayers = 2;
 
-  /** Countdown before steps count. Shortened by tests. */
-  protected countdownMs = 3000;
+  /**
+   * Countdown before steps count. Shortened by tests.
+   *
+   * This is the stilt-picking window, not a "get ready" beat: the room auto-starts the
+   * moment it fills (`BaseGameRoom.onJoin`), typically before a client has finished
+   * loading the Egrang scene, so the countdown is the only time anyone gets to look at
+   * the three poles. Clients render it from the `countdown` message below and take the
+   * highlighted pole automatically when it runs out.
+   */
+  protected countdownMs = 15000;
 
   /** How long the race waits for stragglers after the first finisher. Shortened by tests. */
   protected stragglerMs = 15000;
@@ -45,6 +55,9 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
     },
     step: function (this: EgrangRoom, client: Client, message: any) {
       this.handleStep(client, message);
+    },
+    countdown_sync: function (this: EgrangRoom, client: Client) {
+      this.sendCountdown(client);
     },
   };
 
@@ -73,6 +86,25 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
     this.race = new EgrangRace(seatedSessionIds, this.state.finishUnits);
     this.state.startsAtMs = Date.now() + this.countdownMs;
     this.race.arm(this.state.startsAtMs);
+
+    // `startsAtMs` is a server wall-clock stamp, so a client cannot turn it into "seconds
+    // left" without trusting its own clock — a kiosk with a badly-set clock would show a
+    // wrong countdown. The remaining milliseconds are computed here instead, once at the
+    // start for whoever is already connected, and again per client on `countdown_sync`
+    // for the usual case: a client that was still loading the scene when this fired.
+    this.broadcast("countdown", {
+      startsAtMs: this.state.startsAtMs,
+      remainingMs: this.countdownMs,
+    });
+  }
+
+  /** Tells one client how long is left before steps count. 0 outside a running countdown. */
+  private sendCountdown(client: Client): void {
+    const remainingMs = this.state.phase === "in_progress"
+      ? Math.max(0, this.state.startsAtMs - Date.now())
+      : 0;
+
+    client.send("countdown", { startsAtMs: this.state.startsAtMs, remainingMs });
   }
 
   protected onOpponentLeft(_client: Client): void {

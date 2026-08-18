@@ -30,8 +30,15 @@ stilt does not change what a step is worth. The choice may be made while waiting
 and stays open into the race itself, right up until that racer's first accepted
 step — see "Player actions / inputs" below for why.
 
-The match starts on a 3-second countdown: `startsAtMs` is stamped at game start and
-no step counts before it.
+The match starts on a 15-second countdown: `startsAtMs` is stamped at game start and
+no step counts before it. That window is the stilt-picking window, not a "get ready"
+beat — the room auto-starts the moment it fills, usually before a client has finished
+loading the Egrang scene, so it is the only time anyone gets to look at the three
+poles. Clients show the countdown and take the highlighted pole automatically when it
+runs out.
+
+Because `startsAtMs` is a server wall-clock stamp, clients are not asked to subtract
+their own clock from it: the remaining milliseconds are computed server-side and sent.
 
 ## Player actions / inputs
 
@@ -43,6 +50,10 @@ no step counts before it.
   first step (`stepUnits > 0` or `place > 0`), since only the difficulty of the
   choice — never the race — depends on it.
 - `step { result }` during the race, one per press.
+- `countdown_sync {}` — any time. The server replies to that client alone with
+  `countdown { startsAtMs, remainingMs }`, where `remainingMs` is `0` outside a
+  running countdown. The same payload is broadcast once at game start; the request
+  exists because a client loading the scene (or reconnecting) normally misses it.
 
 **The client grades its own press.** The bar's cursor sweeps a lap in 0.85–2.0 s, so
 grading on arrival would turn a green press into a yellow one on any real

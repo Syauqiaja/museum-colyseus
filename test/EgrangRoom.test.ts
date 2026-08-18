@@ -27,8 +27,8 @@ describe("EgrangRoom", () => {
 
     const aheadMs = room.state.startsAtMs - Date.now();
     assert.ok(
-      aheadMs >= 2500 && aheadMs <= 3500,
-      `expected startsAtMs ~3s ahead of now, got ${aheadMs}ms`,
+      aheadMs >= 14000 && aheadMs <= 15500,
+      `expected startsAtMs ~15s ahead of now, got ${aheadMs}ms`,
     );
 
     for (const client of [host, two, three]) {
@@ -37,6 +37,44 @@ describe("EgrangRoom", () => {
       assert.strictEqual(racer.stepUnits, 0);
       assert.strictEqual(racer.place, 0);
     }
+  });
+
+  it("answers countdown_sync with 0 while the room is still waiting", async () => {
+    const host = await colyseus.sdk.create<EgrangState>("egrang", { private: true, displayName: "A" });
+    const room = colyseus.getRoomById<EgrangState>(host.roomId);
+    await room.waitForNextPatch();
+
+    const countdown = nextMessage(host, "countdown");
+    host.send("countdown_sync", {});
+
+    assert.strictEqual((await countdown)?.remainingMs, 0);
+  });
+
+  it("answers countdown_sync with the time left once the race is armed", async () => {
+    // The Unity client reconnects into the room while loading the scene, so it usually
+    // misses the broadcast that went out at game start; this reply is what it actually
+    // renders the countdown from.
+    const { host, room } = await startedRace();
+
+    const countdown = nextMessage(host, "countdown");
+    host.send("countdown_sync", {});
+    const payload = await countdown;
+
+    assert.strictEqual(payload?.startsAtMs, room.state.startsAtMs);
+    assert.ok(
+      payload.remainingMs > 0 && payload.remainingMs <= 15000,
+      `expected a remaining countdown inside the window, got ${payload?.remainingMs}ms`,
+    );
+  });
+
+  it("reports no countdown left once the race is open", async () => {
+    const { host, room } = await startedRace();
+    openRace(room);
+
+    const countdown = nextMessage(host, "countdown");
+    host.send("countdown_sync", {});
+
+    assert.strictEqual((await countdown)?.remainingMs, 0);
   });
 
   it("records a stilt choice before the race starts", async () => {
