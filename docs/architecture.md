@@ -19,7 +19,7 @@ The Exhibition Museum scene is the entry point/main menu — single-player, no s
 
 Each Room is an isolated game session; the server owns authoritative state. Clients send input events only, never raw state. Per-room message/state contract: [protocol.md](protocol.md).
 
-The matchmaking/lifecycle common to all rooms (create private, public join-or-create, join-by-code, short codes, host, reconnect, idle cleanup) is implemented once in a reusable `BaseGameRoom` and subclassed per game — full detail in [room-system.md](room-system.md). `DakonRoom` is the first full implementation (lobby + move engine); `EgrangRoom` is lobby-only pending its rules.
+The matchmaking/lifecycle common to all rooms (create private, public join-or-create, join-by-code, short codes, host, reconnect, idle cleanup) is implemented once in a reusable `BaseGameRoom` and subclassed per game — full detail in [room-system.md](room-system.md). `DakonRoom` (lobby + move engine) and `EgrangRoom` (lobby + race engine) are both full implementations.
 
 Match results, player profiles and a live seat view are persisted to MySQL — best-effort, never in the path of a match. See [database.md](database.md).
 

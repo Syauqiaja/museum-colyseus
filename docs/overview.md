@@ -8,7 +8,7 @@ Backend for a browser-playable Unity WebGL experience shown at museum kiosks (an
   Assumption (unconfirmed): this scene needs no Colyseus room at all — purely client-side navigation. Revisit if the hub ever needs shared/visible avatars.
 - **Dakon** (Congklak) — multiplayer, **complete**: room, matchmaking, the v6 move engine (`src/games/dakon/DakonBoard.ts`), scoring and `game_over`. Rules: see [games/dakon.md](games/dakon.md).
 - **Engklak** (hopscotch-style) — multiplayer. Rules: see [games/engklak.md](games/engklak.md) (pending — to be supplied).
-- **Egrang** (stilt-walking race) — multiplayer. `EgrangRoom` seats 3 and the host starts at 2, but **the race itself is not implemented**: rules are still pending. See [games/egrang.md](games/egrang.md).
+- **Egrang** (stilt-walking race) — multiplayer, **complete**: room, matchmaking, the race engine (`src/games/egrang/EgrangRace.ts`), the 15 s stilt-picking countdown, places and `game_over`. Seats 3, host may start at 2. Rules: see [games/egrang.md](games/egrang.md).
 
 All three minigames are expected to fit comfortably on plain WebSockets — no need for WebRTC or a heavyweight engine like Photon/NGO (see [tech-stack.md](tech-stack.md)).
 

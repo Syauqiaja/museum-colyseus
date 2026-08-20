@@ -1,6 +1,6 @@
 # Protocol — Client ↔ Server Contract
 
-Message/state contract per Room, so the Unity client and Colyseus server (built independently) don't drift on names/shapes. Game-specific fields are `TODO` pending the matching rules doc in [games/](games/) — the envelope/shape below doesn't depend on exact rules and can be treated as settled.
+Message/state contract per Room, so the Unity client and Colyseus server (built independently) don't drift on names/shapes. Dakon and Egrang are implemented and settled below; only Engklak is still `TODO`, pending its rules doc in [games/](games/).
 
 ## Shared conventions (all rooms)
 
@@ -19,7 +19,7 @@ Message/state contract per Room, so the Unity client and Colyseus server (built 
 
 Room name: `dakon` (implemented — `DakonRoom` + `src/games/dakon/DakonBoard.ts`). Rules: [games/dakon.md](games/dakon.md). 2 seats, starts when both are in.
 
-The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types shuffled per side, a 120-seed pool, 15 seeds drawn per turn.
+The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types shuffled per side, a 60-seed pool, 15 seeds drawn per turn — 4 hands, 2 turns each.
 
 - **State schema** (`DakonState`, on top of the shared `phase` / `hostSessionId` / `players`):
   - `centerPoolCount: number` — seeds still undrawn. The game ends when it hits 0.

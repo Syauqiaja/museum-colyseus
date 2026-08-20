@@ -12,7 +12,9 @@ Contract note: rules below are ground truth for room logic. Message/state contra
 > other — the server is authoritative, so a divergence shows up as a client rendering
 > a board the server does not have. (An earlier draft of this doc described a
 > different board: 24 holes, strictly alternating types, 10-seed draws, own-side
-> sowing. That was never implemented on either side and has been dropped.)
+> sowing. That was never implemented on either side and has been dropped. A later
+> draft of *this* board also said 120 seeds and 8 hands; the pool has always been 60
+> in `DakonConfig.ts`, `DakonConfig.cs` and every test — 4 hands, 2 turns each.)
 
 ## Objective
 
@@ -21,8 +23,8 @@ category (Monokotil or Dikotil). Most seeds in your storehouse at the end wins.
 
 ## Board setup
 
-- **Centre pool:** 120 seeds, half monocot and half dicot (an odd pool would give the
-  extra seed to monocot).
+- **Centre pool:** 60 seeds — 30 monocot and 30 dicot (an odd pool would give the
+  extra seed to monocot). `DAKON_DEFAULTS.poolSeeds`.
 - **20 holes, 10 per player side.** Each side gets exactly 5 dicot and 5 monocot
   holes, **shuffled independently per side** — the sides are not mirrored, and the
   layout is fixed for the match. Holes are typed by category, never by species.
@@ -52,12 +54,12 @@ Each hole is scored and cleared immediately after a seed lands in it:
 | Mismatch — categories differ | +1 opponent | opponent's storehouse |
 
 Holes hold no state between drops. Every seed ends in someone's storehouse, so the
-two storehouses always sum to 120 at the end.
+two storehouses always sum to 60 at the end.
 
 ## Win condition
 
-The game ends when the centre pool is exhausted and the final hand is sown — 8 hands
-of 15, four turns each. Winner = larger storehouse total. A tie is possible and valid
+The game ends when the centre pool is exhausted and the final hand is sown — 4 hands
+of 15, two turns each. Winner = larger storehouse total. A tie is possible and valid
 (`winner: null`).
 
 ## Edge cases

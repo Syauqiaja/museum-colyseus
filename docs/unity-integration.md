@@ -32,7 +32,7 @@ planned:
 |---|---|
 | WebSocket endpoint | `wss://api.museum.fajrsyauqi.com` |
 | Client is served from | `https://museum.fajrsyauqi.com` (same VPS, `/var/www/museum`) |
-| Registered room names | `dakon` (2 seats), `egrang` (3 seats, lobby only — race not implemented) |
+| Registered room names | `dakon` (2 seats), `egrang` (3 seats, `minPlayers` 2) — both fully implemented |
 | Room code | 6 chars, alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I/L/O/0/1) |
 | Join options | `{ private?: bool, displayName?: string (≤32 chars), playerId?: string }` |
 | Start | host sends `start_game`; also auto-starts when the room fills |
@@ -42,7 +42,10 @@ planned:
 | CORS | handled by Colyseus; cross-origin from the client host works as-is |
 
 `engklak` is **not** registered on the server — only `dakon` and `egrang` exist
-today. Don't ship a menu entry that tries to join it.
+today. Don't ship a menu entry that tries to join it. Egrang's race is fully
+server-side: 50 strides, a 15 s stilt-picking countdown, a 500 ms floor between accepted
+steps, places 1–3 and a 15 s straggler timeout after the first finisher — see
+[games/egrang.md](games/egrang.md).
 
 Health checks the client project can hit directly:
 
@@ -69,7 +72,7 @@ No Colyseus connection at all — this scene is single-player/client-side only (
 
 ## 4. Creating / joining a room
 
-Room names per game (see [protocol.md](protocol.md), TBD-confirm exact strings once rooms are implemented): `dakon`, `engklak`, `egrang`.
+Room names: `dakon` and `egrang` — both registered in `src/app.config.ts` and settled in [protocol.md](protocol.md). `engklak` does **not** exist; don't join it.
 
 ```csharp
 // Create a new room (host flow) — server generates the shareable room code (roomId)
@@ -136,7 +139,7 @@ Call `room.Leave()` on explicit "return to lobby"/"quit" actions — don't just 
 
 ## Open items (not yet resolved — don't guess)
 
-- Exact final room name strings and per-game state schema class names/fields beyond what's drafted in [protocol.md](protocol.md) — still TBD pending room implementation. (The production domain is settled: `api.museum.fajrsyauqi.com`, see §2.) Check `protocol.md` and `dev-plan.md` for current status before hardcoding anything here.
+- **Engklak only.** Its room name, state schema and message set do not exist and its rules were never supplied — see [games/engklak.md](games/engklak.md). Everything else here is settled: the room names (`dakon`, `egrang`), both schemas, and the production domain `api.museum.fajrsyauqi.com`.
 
 ## Client status (as built)
 
@@ -147,11 +150,19 @@ The Unity client is wired to this server, not to a mock:
   the decoder addresses fields by index, so a drift shows as garbled state, not an error.
 - **Lobby**: `ColyseusLobbyService` creates private rooms / joins by code, renders the
   base lobby fields, and sends `start_game`. Rejections arrive as `error` messages.
-- **Handoff**: the lobby releases its room *unconsented* (`ReleaseForHandoff`) before the
-  game scene loads, so the seat sits in `allowReconnection` instead of looking like a
-  walkout; the game scene reconnects with the token cached in `SessionData`. Without that
-  release, the dying lobby socket ends the match for everyone else.
+- **Handoff**: the lobby loads the game scene **without leaving the room**. Its socket dies
+  with the scene, which the server sees as a drop, so the seat sits in `allowReconnection`
+  (30 s) rather than looking like a walkout; the game scene then reconnects with the token
+  cached in `SessionData` and lands in the same seat. `ColyseusLobbyService.Leave()` runs
+  only on a real walkout, and leaves *consented* so the seat frees immediately.
 - **Dakon**: `NetDakonSession` renders `DakonState` and sends `drop_seed`; nothing is drawn
-  optimistically, so the board always matches the server.
+  optimistically, so the board always matches the server. Drops are pipelined — the client
+  predicts `nextHoleIndex + <in flight>` so a player can click a whole hand without waiting
+  a round trip each time.
+- **Egrang**: `NetEgrangSession` drives the race from `step_taken`, `countdown` and
+  `game_over` messages rather than schema callbacks. The client grades its own press and
+  animates immediately; each `step_taken` either confirms the local stride count or snaps
+  the racer onto the server's. `state.racers[].stepUnits` is read only to place a
+  reconnecting client.
 - **Identity**: the client sends `playerId`, a GUID it mints into PlayerPrefs. Stats only —
   see [database.md](database.md).

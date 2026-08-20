@@ -10,7 +10,7 @@ All project knowledge, decisions, and agent instructions live here. Read relevan
 - [database.md](database.md) — what MySQL stores (players, matches, live seats), setup, identity and privacy rules
 - [deployment.md](deployment.md) — how to get this server **and the Unity WebGL build** onto one VPS: hostnames, build, PM2, env vars, nginx/TLS, exposed routes, redeploys
 - [unity-integration.md](unity-integration.md) — how to wire the Unity client to this server (SDK, connect, join/create, state, messages, reconnect)
-- [games/](games/) — per-game rules ground truth: [dakon.md](games/dakon.md), [engklak.md](games/engklak.md), [egrang.md](games/egrang.md) (rules still TODO — the Egrang **room** exists, the race does not)
+- [games/](games/) — per-game rules ground truth: [dakon.md](games/dakon.md) and [egrang.md](games/egrang.md) (both implemented and settled), [engklak.md](games/engklak.md) (rules still TODO — nothing is implemented)
 - [boundaries.md](boundaries.md) — what's explicitly out of scope / not to introduce
 - [agent-instructions.md](agent-instructions.md) — how an agent (Claude or otherwise) should work in this repo
 - [dev-plan.md](dev-plan.md) — original full dev plan (phases, timeline, cost, risks) — historical/networking rationale; game list there is outdated, see overview.md for current scope

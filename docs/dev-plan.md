@@ -61,7 +61,7 @@ Each "room" is an isolated game session/state instance. The server (Photon cloud
 
 ## 5. Room System Design
 
-> **Status: delivered.** Implemented as the reusable `BaseGameRoom` (`src/rooms/`), subclassed by `DakonRoom`. See [room-system.md](room-system.md) for the as-built reference. Dakon move engine (§5b) still pending.
+> **Status: delivered.** Implemented as the reusable `BaseGameRoom` (`src/rooms/`), subclassed by `DakonRoom` and `EgrangRoom`. See [room-system.md](room-system.md) for the as-built reference. Both move engines (§5b) are delivered too: `src/games/dakon/DakonBoard.ts` and `src/games/egrang/EgrangRace.ts`.
 
 - **Room ID generation:** short human-friendly code (e.g., 5–6 alphanumeric chars, avoid ambiguous chars like 0/O, 1/I). Generated server-side on "Create Room," checked for collision against active rooms.
 - **Create flow:** Player clicks "Create Room" → client requests server → server allocates room, returns code → host shares code (or a shareable link like `yourgame.com/?room=AB12CD`).
