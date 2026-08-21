@@ -232,10 +232,9 @@ describe("EgrangRoom", () => {
     assert.strictEqual(room.state.racers.get(host.sessionId)?.stepUnits, 0);
   });
 
-  it("places a finisher and ends the race once the stragglers time out", async () => {
+  it("ends the race the moment the first racer crosses the line", async () => {
     const { host, room } = await startedRace();
     openRace(room);
-    (room as any).stragglerMs = 50;
     (room as any).race.finishUnits = 2;
     room.state.finishUnits = 2;
 
@@ -249,41 +248,33 @@ describe("EgrangRoom", () => {
     assert.strictEqual(room.state.phase, "finished");
   });
 
-  it("ends immediately once every racer is placed, without waiting for the straggler timer", async () => {
+  it("leaves the racers who were still running unplaced when the winner lands", async () => {
     const { host, two, three, room } = await startedRace();
     openRace(room);
-    // Large enough that a game_over caught within nextMessage's 250 ms window
-    // cannot be the straggler timer firing — only the allPlaced branch can.
-    (room as any).stragglerMs = 60000;
     (room as any).race.finishUnits = 2;
     room.state.finishUnits = 2;
 
     const over = nextMessage(host, "game_over");
 
-    // One step each is enough to finish (finishUnits = 2, a full step banks 2).
-    // Different racers have independent rate-limit timers, so no need to space
-    // these out — only repeated steps from the SAME racer need 500 ms apart.
+    // finishUnits = 2, so one full step finishes. `two` banks a half step and is
+    // still on the course when the host crosses; `three` never steps at all.
+    two.send("step", { result: 1 });
+    await room.waitForNextPatch();
     host.send("step", { result: 2 });
-    await room.waitForNextPatch();
-    two.send("step", { result: 2 });
-    await room.waitForNextPatch();
-    three.send("step", { result: 2 });
 
     const payload = await over;
     assert.strictEqual(payload?.winner, host.sessionId);
     assert.strictEqual(payload?.places[host.sessionId], 1);
-    assert.strictEqual(payload?.places[two.sessionId], 2);
-    assert.strictEqual(payload?.places[three.sessionId], 3);
+    assert.strictEqual(payload?.places[two.sessionId], 0);
+    assert.strictEqual(payload?.places[three.sessionId], 0);
     assert.strictEqual(room.state.racers.get(host.sessionId)?.place, 1);
-    assert.strictEqual(room.state.racers.get(two.sessionId)?.place, 2);
-    assert.strictEqual(room.state.racers.get(three.sessionId)?.place, 3);
+    assert.strictEqual(room.state.racers.get(two.sessionId)?.stepUnits, 1);
     assert.strictEqual(room.state.phase, "finished");
   });
 
   it("keeps the race running for two survivors when a third racer leaves mid-race", async () => {
     const { host, two, three, room } = await startedRace();
     openRace(room);
-    (room as any).stragglerMs = 60000;
     (room as any).race.finishUnits = 2;
     room.state.finishUnits = 2;
 
@@ -299,17 +290,14 @@ describe("EgrangRoom", () => {
     const over = nextMessage(host, "game_over");
 
     host.send("step", { result: 2 });
-    await room.waitForNextPatch();
-    two.send("step", { result: 2 });
 
     const payload = await over;
     assert.strictEqual(payload?.winner, host.sessionId);
     assert.strictEqual(payload?.places[host.sessionId], 1);
-    assert.strictEqual(payload?.places[two.sessionId], 2);
-    // The straggler who left never places.
+    // Still running when the winner landed, and the racer who left, both unplaced.
+    assert.strictEqual(payload?.places[two.sessionId], 0);
     assert.strictEqual(payload?.places[departedSessionId], 0);
     assert.strictEqual(room.state.racers.get(host.sessionId)?.place, 1);
-    assert.strictEqual(room.state.racers.get(two.sessionId)?.place, 2);
     assert.strictEqual(room.state.phase, "finished");
   });
 

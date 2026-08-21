@@ -5,7 +5,7 @@ truth for `EgrangRoom`; the Unity client implements the same numbers.
 
 ## Objective
 
-First racer to cover the lane wins. All three are ranked: places 1, 2 and 3.
+First racer to cover the lane wins, and winning ends the race for everyone.
 
 ## Track setup
 
@@ -65,8 +65,10 @@ the race — banked strides, places, winner, persisted score — is the server's
 ## Win condition
 
 Reaching 50 strides takes the next free place (1, then 2, then 3). The match ends
-when all racers are placed, or 15 s after the first finisher, whichever comes first.
-Unplaced racers keep `place = 0` and their banked strides, which is their score.
+the moment place 1 is taken — nobody is kept waiting on a lane they cannot win —
+or when every racer is placed, which a three-way race can reach on a later step
+than the winner's. Unplaced racers keep `place = 0` and their banked strides,
+which is their score.
 
 ## Edge cases
 
@@ -76,6 +78,6 @@ Unplaced racers keep `place = 0` and their banked strides, which is their score.
   rejected with `invalid_move`, the stored stilt unchanged.
 - Banked strides clamp at `finishUnits`; a Full step across the line is not overshot.
 - A racer who leaves mid-race stops sending steps. The base class's forfeit
-  bookkeeping applies and the straggler timeout ends the race for the rest.
+  bookkeeping applies and the first survivor home ends the race for the rest.
 - Reconnect: `stepUnits` is synced state, so a returning client places its racer
   from it rather than replaying steps.

@@ -44,7 +44,7 @@ planned:
 `engklak` is **not** registered on the server — only `dakon` and `egrang` exist
 today. Don't ship a menu entry that tries to join it. Egrang's race is fully
 server-side: 50 strides, a 15 s stilt-picking countdown, a 500 ms floor between accepted
-steps, places 1–3 and a 15 s straggler timeout after the first finisher — see
+steps, and places 1–3, with the race ending the moment the first racer crosses — see
 [games/egrang.md](games/egrang.md).
 
 Health checks the client project can hit directly:

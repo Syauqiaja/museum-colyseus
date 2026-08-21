@@ -67,7 +67,7 @@ Distance is counted in **strides** (0.5 m each on the client), never in world co
 - **Server → client:**
   - `step_taken` — `{ sessionId, result, stepUnits }` — one per accepted press, to everyone including the sender. Remote clients replay the stride animation from it; the sender uses it to confirm its prediction.
   - `error` — `{ code, message }`: `invalid_move` for a malformed payload, a step before the countdown, a step from an unseated or already-placed client, one inside the rate limit, or a `choose_stick` after the race is over or after that racer has already stepped.
-  - `game_over` — `{ places: { [sessionId]: number }, winner: string | null }` — `0` means never finished. Emitted when all racers are placed or 15 s after the first finisher.
+  - `game_over` — `{ places: { [sessionId]: number }, winner: string | null }` — `0` means never finished. Emitted the moment the first racer crosses the line (or, in a race whose last place is taken by someone other than the winner, when all racers are placed).
 
 Nothing about the skill-check bar is simulated server-side: the room stores outcomes, not cursor positions.
 

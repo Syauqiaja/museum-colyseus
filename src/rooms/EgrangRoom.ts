@@ -44,9 +44,6 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
    */
   protected countdownMs = 15000;
 
-  /** How long the race waits for stragglers after the first finisher. Shortened by tests. */
-  protected stragglerMs = 15000;
-
   private race?: EgrangRace;
 
   messages = {
@@ -109,7 +106,7 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
 
   protected onOpponentLeft(_client: Client): void {
     // The base has already written the forfeit. A departed racer simply stops
-    // stepping; the straggler timeout ends it for the rest.
+    // stepping; the first racer home ends it for the rest.
   }
 
   /**
@@ -121,8 +118,8 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
    * bookkeeping half of the base behaviour (remove the player, broadcast
    * `player_left`, record the departure, migrate host) and withdraws the racer
    * from the engine so `allPlaced` no longer waits on someone who will never
-   * step again — the survivors reach a normal `game_over`, either by all
-   * placing or via the existing straggler timer. It deliberately does NOT call
+   * step again — the survivors reach a normal `game_over` when one of them
+   * crosses the line. It deliberately does NOT call
    * `persistMatchEnd`/`onOpponentLeft`: the match isn't over yet, and `finish()`
    * (which does persist, exactly once — see its `matchId` guard) is the only
    * path that should close it.
@@ -225,18 +222,17 @@ export class EgrangRoom extends BaseGameRoom<EgrangState> {
       stepUnits: outcome.stepUnits,
     });
 
-    if (race.allPlaced) {
+    // First one home ends the race for everyone: the others keep whatever place
+    // they had already taken (0 for anyone still running), and the results panel
+    // reads as "the race is over" rather than "wait and see". `allPlaced` is
+    // still checked because a three-way race can place its last racer without
+    // that racer being the first one home.
+    if (outcome.place === 1 || race.allPlaced) {
       this.finish();
-      return;
-    }
-
-    // First one home starts the clock on everyone else. One timer, armed once.
-    if (outcome.place === 1) {
-      this.clock.setTimeout(() => this.finish(), this.stragglerMs);
     }
   }
 
-  /** Closes the race exactly once: the straggler timer and the last finisher both land here. */
+  /** Closes the race exactly once: the first racer home and the last one both land here. */
   private finish(): void {
     if (!this.race || this.state.phase === "finished") return;
 

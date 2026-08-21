@@ -105,7 +105,8 @@ export class EgrangRace {
     return counted;
   }
 
-  /** When the first racer crossed, or null while nobody has. Drives the straggler timeout. */
+  /** When the first racer crossed, or null while nobody has. Kept for stats/logging;
+   *  the room ends the race on the crossing itself, not on a timer. */
   get firstFinishMs(): number | null {
     return this.firstFinish;
   }
