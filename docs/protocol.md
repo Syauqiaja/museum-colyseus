@@ -23,7 +23,7 @@ The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole 
 
 - **State schema** (`DakonState`, on top of the shared `phase` / `hostSessionId` / `players`):
   - `centerPoolCount: number` — seeds still undrawn. The game ends when it hits 0.
-  - `holes: string[20]` — each `"monocot" | "dicot"`. Ring order: indices 0–9 = seat 0's side, 10–19 = seat 1's. Fixed for the match. Holes hold no seeds between drops — each drop is swept immediately.
+  - `holes: string[20]` — each `"monocot" | "dicot"`. Ring order: indices 0–9 = seat 0's side, 10–19 = seat 1's. Fixed for the match, and now fixed *across* matches: it is the constant `DAKON_HOLE_TYPES`, pinned to the icons painted on the client's board (see `docs/games/dakon.md`). Still sent every match rather than assumed — the client renders what it is told. Holes hold no seeds between drops — each drop is swept immediately.
   - `activePlayer: string` — sessionId of the player to act.
   - `nextHoleIndex: number` — the forced destination of the next drop. Advances by 1 and wraps around the ring, so a 15-seed hand spills onto the opponent's side.
   - `hand: { id, category, typeId }[]` — the active player's undropped seeds (15, or fewer on the final draw). Public rather than private: simplest authoritative shape, and the client decides what to render for whom. `category` scores; `typeId` is the species (a Unity `SeedType` asset name) and is cosmetic.

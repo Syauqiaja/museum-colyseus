@@ -1,4 +1,9 @@
-import { DAKON_DEFAULTS, totalHoles, type DakonConfig } from "./DakonConfig.js";
+import {
+  DAKON_DEFAULTS,
+  totalHoles,
+  type DakonConfig,
+  type SeedCategory,
+} from "./DakonConfig.js";
 
 /**
  * Dakon rules engine (v6 ruleset) — plain TypeScript, no Colyseus types.
@@ -8,7 +13,8 @@ import { DAKON_DEFAULTS, totalHoles, type DakonConfig } from "./DakonConfig.js";
  * without booting a server, exactly as its C# twin is tested without a Unity scene.
  *
  * Ruleset in one paragraph: a ring of `holesPerSide * 2` holes, each typed monocot
- * or dicot (shuffled per side, `dicotPerSide` of them dicot). The active player
+ * or dicot by the fixed `holeTypes` layout (five of each per side, pinned to the
+ * icons painted on the client's board rather than rolled). The active player
  * grabs `grabSize` random seeds from the centre pool and drops them one at a time
  * into consecutive holes, starting at their side's first hole and wrapping around
  * the ring — so a long hand does spill onto the opponent's side. Each drop is swept
@@ -23,7 +29,9 @@ import { DAKON_DEFAULTS, totalHoles, type DakonConfig } from "./DakonConfig.js";
  * is told rather than re-simulating.
  */
 
-export type SeedCategory = "monocot" | "dicot";
+// Declared in DakonConfig (the pinned hole layout is typed with it) and re-exported
+// here, which is where the rest of the server has always imported it from.
+export type { SeedCategory };
 
 export type DakonPhase = "waiting" | "in_progress" | "finished";
 
@@ -105,9 +113,7 @@ export class DakonBoard {
   // --- setup ---------------------------------------------------------------
 
   start(): void {
-    this.holes = new Array(totalHoles(this.config));
-    this.rollSide(0);
-    this.rollSide(1);
+    this.holes = this.holeLayout();
     this.fillPool();
 
     this.activeSeat = 0;
@@ -116,20 +122,25 @@ export class DakonBoard {
     this.grabHand();
   }
 
-  /** Each side gets exactly `dicotPerSide` dicot holes, shuffled independently. */
-  private rollSide(side: number): void {
-    const per = this.config.holesPerSide;
-    const base = side * per;
+  /**
+   * The hole types, copied from `config.holeTypes` rather than rolled.
+   *
+   * They used to be shuffled per side here, which made the twenty botanical icons
+   * painted on the client's board decorative — a hole under a taproot was dicot only
+   * half the time. The paint cannot move, so the ruleset is pinned to it instead; see
+   * `DAKON_HOLE_TYPES`. Copied rather than aliased, so a board cannot write back
+   * through the shared config into the next match.
+   */
+  private holeLayout(): SeedCategory[] {
+    const total = totalHoles(this.config);
+    const pinned = this.config.holeTypes;
 
-    const types: SeedCategory[] = [];
-    for (let i = 0; i < per; i++) {
-      types.push(i < this.config.dicotPerSide ? "dicot" : "monocot");
+    const layout: SeedCategory[] = new Array(total);
+    for (let i = 0; i < total; i++) {
+      layout[i] = pinned[i] ?? "monocot";
     }
-    this.shuffle(types);
 
-    for (let i = 0; i < per; i++) {
-      this.holes[base + i] = types[i];
-    }
+    return layout;
   }
 
   private fillPool(): void {
@@ -167,13 +178,6 @@ export class DakonBoard {
 
   private startHoleFor(seat: number): number {
     return seat === 0 ? 0 : this.config.holesPerSide;
-  }
-
-  private shuffle<T>(list: T[]): void {
-    for (let i = list.length - 1; i > 0; i--) {
-      const j = Math.floor(this.random() * (i + 1));
-      [list[i], list[j]] = [list[j], list[i]];
-    }
   }
 
   // --- play ----------------------------------------------------------------

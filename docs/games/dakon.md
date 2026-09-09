@@ -25,12 +25,42 @@ category (Monokotil or Dikotil). Most seeds in your storehouse at the end wins.
 
 - **Centre pool:** 60 seeds — 30 monocot and 30 dicot (an odd pool would give the
   extra seed to monocot). `DAKON_DEFAULTS.poolSeeds`.
-- **20 holes, 10 per player side.** Each side gets exactly 5 dicot and 5 monocot
-  holes, **shuffled independently per side** — the sides are not mirrored, and the
-  layout is fixed for the match. Holes are typed by category, never by species.
+- **20 holes, 10 per player side.** Each side has exactly 5 dicot and 5 monocot
+  holes, in a **fixed layout** (`DAKON_HOLE_TYPES`) — the same board every match, not
+  a roll. Holes are typed by category, never by species. See *The hole layout is the
+  artwork* below; it is pinned to the client's board texture and the two must change
+  together.
 - **2 storehouses**, one per player, each split monocot/dicot for display.
 - **Seed species** are cosmetic; category is what scores. A monocot hole accepts any
   monocot species. Species ids are the client's `SeedType` asset names.
+
+### The hole layout is the artwork
+
+The client's board texture (`Assets/Texture2D/dakon_surface.png`) has a botanical icon
+painted above each of the twenty holes — a corn kernel, a taproot, a five-petal flower
+— and that is how a player is meant to read what a hole accepts. It is the exhibit's
+teaching device.
+
+The types were shuffled per side in `start()` until this was noticed. No code has ever
+read or written that texture, so the icons were decorative: a hole under a taproot was
+a dicot hole half the time. Paint cannot move, so the ruleset was pinned to it —
+`DAKON_HOLE_TYPES` in `DakonConfig.ts` is the layout read off the texture, entry by
+entry, each commented with the icon it came from.
+
+Ring order follows the client's hole anchors, which follow the art: **0–9 is seat 0's
+near row, left to right**; **10–19 is seat 1's far row, whose `p0` anchor is the
+rightmost hole**, so those ten read *right to left*.
+
+This array must stay identical to the client's `DakonConfig.HoleTypes`
+(`Assets/Scripts/Games/Dakon/DakonConfig.cs`). The server is still authoritative and
+still sends `holes` in state — the client renders what it is told, as always — but a
+divergence now shows up as an online board that contradicts the printed one.
+
+**Known, unfixed:** three species are botanically miscategorised — `alpukat` (avocado)
+and `zaitun` (olive) are grouped monocot and are dicots, `jagung` (corn) is grouped
+dicot and is a monocot. Correcting them splits the eight species 3/5 and breaks the
+even round-robin, so it needs two more monocot species: a content decision. The hole
+layout is unaffected — holes are typed by category, and the painted icons are right.
 
 ## Turn order
 

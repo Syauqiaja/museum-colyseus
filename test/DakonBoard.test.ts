@@ -1,5 +1,6 @@
 import assert from "assert";
 import { DakonBoard } from "../src/games/dakon/DakonBoard.js";
+import { DAKON_HOLE_TYPES } from "../src/games/dakon/DakonConfig.js";
 
 /**
  * Rules-only tests: no server, no room. These pin the v6 ruleset the client's
@@ -47,6 +48,33 @@ describe("DakonBoard — v6 rules", () => {
       assert.strictEqual(types.filter((t) => t === "dicot").length, 5);
       assert.strictEqual(types.filter((t) => t === "monocot").length, 5);
     }
+  });
+
+  // The layout is pinned to the icons painted on the client's board, so it is the
+  // same board every match — and the same board on both sides of the wire. A rolled
+  // layout would pass the 5/5 test above and still contradict the picture.
+  it("lays the holes out exactly as DAKON_HOLE_TYPES, whatever the seed", () => {
+    for (const seed of [1, 7, 42, 9999]) {
+      const board = new DakonBoard(seed);
+      board.start();
+
+      assert.deepStrictEqual(
+        board.holeTypes,
+        DAKON_HOLE_TYPES,
+        `seed ${seed} rolled a layout instead of using the painted one`,
+      );
+    }
+  });
+
+  it("copies the layout, so no board holds the shared array itself", () => {
+    const board = new DakonBoard(1);
+    board.start();
+
+    assert.notStrictEqual(
+      board.holeTypes,
+      DAKON_HOLE_TYPES,
+      "a board aliasing the config could retype every future match",
+    );
   });
 
   it("a match scores the dropper, a mismatch scores the opponent", () => {
@@ -166,6 +194,9 @@ describe("DakonBoard — v6 rules", () => {
     assert.strictEqual(board.drop(0, "s0", board.nextHoleIndex).ok, false);
   });
 
+  // The seed decides the deal, not the board. The hole layout used to vary with it and
+  // no longer does — it is pinned to the artwork — so the "different across seeds" half
+  // of this now belongs to the hand.
   it("is deterministic for a given seed, and different across seeds", () => {
     const a = new DakonBoard(99);
     const b = new DakonBoard(99);
@@ -179,6 +210,14 @@ describe("DakonBoard — v6 rules", () => {
       a.currentHand.map((s) => s.id),
       b.currentHand.map((s) => s.id),
     );
-    assert.notDeepStrictEqual([...a.holeTypes], [...c.holeTypes]);
+    assert.notDeepStrictEqual(
+      a.currentHand.map((s) => s.id),
+      c.currentHand.map((s) => s.id),
+    );
+    assert.deepStrictEqual(
+      [...a.holeTypes],
+      [...c.holeTypes],
+      "the board is the same every match, whatever the seed",
+    );
   });
 });
