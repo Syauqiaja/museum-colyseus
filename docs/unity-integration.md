@@ -32,7 +32,7 @@ planned:
 |---|---|
 | WebSocket endpoint | `wss://api.museumethnofun.com` |
 | Client is served from | `https://museumethnofun.com` (same VPS, `/var/www/museum`) |
-| Registered room names | `dakon` (2 seats), `egrang` (3 seats, `minPlayers` 2) — both fully implemented |
+| Registered room names | `dakon` (2 seats), `egrang` (3 seats, `minPlayers` 2) — both fully implemented; `museum` (presence, up to 50 visitors — see §3) |
 | Room code | 6 chars, alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I/L/O/0/1) |
 | Join options | `{ private?: bool, displayName?: string (≤32 chars), playerId?: string }` |
 | Start | host sends `start_game`; also auto-starts when the room fills |
@@ -68,11 +68,11 @@ Build and upload:
 
 ## 3. Exhibition Museum scene
 
-No Colyseus connection at all — this scene is single-player/client-side only (see [overview.md](overview.md)). Don't instantiate a `ColyseusClient` here; only the 3 minigame scenes need one.
+`MuseumPresence` (on the player rig) calls `JoinOrCreate<MuseumState>("museum", { displayName })` on the shared `ColyseusNetManager` client, sends `move` `{ x, y, z, yaw }` up to 10×/s, and draws a `MuseumVisitorAvatar` per other `state.visitors` entry, 200 ms in the past and interpolated between received positions. It bypasses `ColyseusNetManager`'s create/join helpers so the presence room is never recorded as the player's game seat. No server reachable → the museum is walked alone. Contract: [protocol.md](protocol.md#exhibition-museum-scene).
 
 ## 4. Creating / joining a room
 
-Room names: `dakon` and `egrang` — both registered in `src/app.config.ts` and settled in [protocol.md](protocol.md). `engklak` does **not** exist; don't join it.
+Game room names: `dakon` and `egrang` — both registered in `src/app.config.ts` and settled in [protocol.md](protocol.md). (`museum` is registered too, but it is the presence room above, not a game.) `engklak` does **not** exist; don't join it.
 
 ```csharp
 // Create a new room (host flow) — server generates the shareable room code (roomId)

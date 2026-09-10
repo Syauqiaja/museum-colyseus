@@ -2,7 +2,7 @@
 
 ```
 [Browser: Unity WebGL Build]
-   ├── Exhibition Museum scene (single-player, client-side only — no room)
+   ├── Exhibition Museum scene (presence only — room "museum")
    └── Minigame scenes ↴
          |  (WebSocket, Colyseus Unity SDK)
          v
@@ -15,7 +15,7 @@
    └── Room "..."
 ```
 
-The Exhibition Museum scene is the entry point/main menu — single-player, no server room (assumption, unconfirmed — revisit if the hub ever needs shared/visible avatars). It launches into one of the 3 multiplayer minigame scenes, each backed by its own Room type.
+The Exhibition Museum scene is the entry point/main menu. It joins one public `museum` presence room (`MuseumRoom`, a plain `Room`, not a `BaseGameRoom`) so visitors see each other's avatars — see [protocol.md](protocol.md#exhibition-museum-scene). It launches into one of the 3 multiplayer minigame scenes, each backed by its own Room type.
 
 Each Room is an isolated game session; the server owns authoritative state. Clients send input events only, never raw state. Per-room message/state contract: [protocol.md](protocol.md).
 

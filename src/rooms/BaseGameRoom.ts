@@ -2,6 +2,7 @@ import { Room, Client, ServerError } from "colyseus";
 import type { Delayed } from "@colyseus/timer";
 import { BaseGameState } from "./schema/BaseGameState.js";
 import { BasePlayer } from "./schema/BasePlayer.js";
+import { sanitizeAvatar } from "./avatars.js";
 import { sanitizePlayerId, touchPlayer } from "../db/players.js";
 import {
   finishMatch,
@@ -146,6 +147,7 @@ export abstract class BaseGameRoom<S extends BaseGameState> extends Room<{ state
     const player = new BasePlayer();
     player.sessionId = client.sessionId;
     player.displayName = displayName;
+    player.avatar = sanitizeAvatar(options?.avatar);
     player.connected = true;
     player.seat = this.nextFreeSeat();
     this.state.players.set(client.sessionId, player);

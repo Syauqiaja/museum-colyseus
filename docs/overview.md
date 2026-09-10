@@ -1,11 +1,10 @@
 # Overview
 
-Backend for a browser-playable Unity WebGL experience shown at museum kiosks (and publicly on the web, same server). The Unity frontend has **4 scenes**: one single-player exhibition hub and three multiplayer minigames launched from it. Players create or join a minigame room by short code; many rooms run concurrently, fully isolated from each other. The create/join-public/join-by-code matchmaking is a shared, reusable layer (`BaseGameRoom`) — see [room-system.md](room-system.md).
+Backend for a browser-playable Unity WebGL experience shown at museum kiosks (and publicly on the web, same server). The Unity frontend has **4 scenes**: one shared exhibition hub (visitors see each other walking it) and three multiplayer minigames launched from it. Players create or join a minigame room by short code; many rooms run concurrently, fully isolated from each other. The create/join-public/join-by-code matchmaking is a shared, reusable layer (`BaseGameRoom`) — see [room-system.md](room-system.md).
 
 ## Scenes
 
-- **Virtual Exhibition Museum** — entry point / main menu. Single-player: the player just walks around and picks a minigame to launch. **Not multiplayer.**
-  Assumption (unconfirmed): this scene needs no Colyseus room at all — purely client-side navigation. Revisit if the hub ever needs shared/visible avatars.
+- **Virtual Exhibition Museum** — entry point / main menu. The player walks around and picks a minigame to launch. Not a game, but **shared**: the `museum` presence room (`src/rooms/MuseumRoom.ts`) syncs every visitor's position and name so they see each other in the hall. See [protocol.md](protocol.md#exhibition-museum-scene).
 - **Dakon** (Congklak) — multiplayer, **complete**: room, matchmaking, the v6 move engine (`src/games/dakon/DakonBoard.ts`), scoring and `game_over`. Rules: see [games/dakon.md](games/dakon.md).
 - **Engklak** (hopscotch-style) — multiplayer. Rules: see [games/engklak.md](games/engklak.md) (pending — to be supplied).
 - **Egrang** (stilt-walking race) — multiplayer, **complete**: room, matchmaking, the race engine (`src/games/egrang/EgrangRace.ts`), the 15 s stilt-picking countdown, places and `game_over`. Seats 3, host may start at 2. Rules: see [games/egrang.md](games/egrang.md).

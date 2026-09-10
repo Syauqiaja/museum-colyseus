@@ -4,7 +4,7 @@ Message/state contract per Room, so the Unity client and Colyseus server (built 
 
 ## Shared conventions (all rooms)
 
-- **Join:** client calls `joinById(roomId)` to join an existing room, `create(roomName, options)` to make a private one, or `joinOrCreate(roomName, options)` for public matchmaking. `options`: `{ private?: boolean, displayName?: string, playerId?: string }`. `playerId` is the client's stable GUID and is stats-only — never authorisation (see [database.md](database.md)). Room codes are 6-char (see [room-system.md](room-system.md)).
+- **Join:** client calls `joinById(roomId)` to join an existing room, `create(roomName, options)` to make a private one, or `joinOrCreate(roomName, options)` for public matchmaking. `options`: `{ private?: boolean, displayName?: string, playerId?: string, avatar?: string }`. `playerId` is the client's stable GUID and is stats-only — never authorisation (see [database.md](database.md)). `avatar` is the character the player chose on the welcome screen — one of `"jawa" | "bali" | "bugis" | "minang"` (`AVATAR_IDS`, `src/rooms/avatars.ts`); anything else, or nothing, becomes `"jawa"`. It is cosmetic and lands on `players[sessionId].avatar` (`BasePlayer`, last field) and on museum visitors. Room codes are 6-char (see [room-system.md](room-system.md)).
 - **Starting:** `phase` starts `"waiting"`. The **host** sends `start_game` (no payload) once at least `minPlayers` are seated (2 for both Dakon and Egrang); the room also starts by itself when it fills to `maxClients`, since there is nothing left to wait for. On start the phase flips to `"in_progress"` and the room locks. A rejected start is an `error` message — the player stays seated. Codes: `not_host`, `not_enough_players`, `already_started`.
 - **Seats:** every player carries a 0-based `seat` in `state.players`, assigned on join and reused when a seat frees up. Games map it to sides (Dakon seat 0 sows from hole 0).
 - **State sync:** server is authoritative; state is an `@colyseus/schema` object, auto-diffed to clients on every mutation. Clients never send state directly — only messages (events).
@@ -73,4 +73,14 @@ Nothing about the skill-check bar is simulated server-side: the room stores outc
 
 ## Exhibition Museum scene
 
-No room, no protocol — single-player, client-side only (see [overview.md](overview.md), [architecture.md](architecture.md)). Nothing to define here unless that assumption changes.
+Room name: `museum` (implemented — `MuseumRoom`). A **presence** room, not a match: visitors walking the exhibition hall see each other. It does not extend `BaseGameRoom` — no phase, host, seat, `start_game`, room code, reconnection window or persisted result.
+
+- **Join:** `joinOrCreate("museum", { displayName, avatar })` — every visitor lands in the one public hall. `maxClients` is 50; past that, `joinOrCreate` opens a second hall and the two don't see each other. The client opens this room directly on its `Client`, never as "the seat it holds", and leaves it when a doorway loads the lobby.
+- **State schema** (`MuseumState`):
+  - `visitors: { [sessionId]: { displayName, x, y, z, yaw, avatar } }` — `avatar` is the sanitised join option (see shared conventions); `x/y/z` are the Unity client's world metres (`float32`), `yaw` the sender's camera heading in degrees, normalised to `0..360`. The Unity client uses it only to orient a visitor it has just seen; after that it turns a remote avatar toward its direction of travel, so looking around in place does not spin a body for everyone else. A visitor appears here on their **first valid `move`**, not on join (so nobody is drawn at the origin), and is removed the moment their socket closes. Clients skip their own `sessionId`.
+  - Patched at 20 Hz (`patchRate` 50 ms). Clients draw each other 200 ms in the past, interpolating between received positions — the smoothing is entirely client-side.
+- **Client → server:**
+  - `move` — `{ x, y, z, yaw }`, all finite numbers with `|n| ≤ 10000`. The client sends it at most 10×/s and only when it has moved. Position is trusted (it decides nothing), only bounded.
+- **Server → client:**
+  - State patches.
+  - `error` — `{ code, message }`: `invalid_move` for a malformed `move`.

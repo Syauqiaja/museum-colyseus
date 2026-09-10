@@ -21,4 +21,11 @@ export class BasePlayer extends Schema {
 
   /** false while the player is dropped and inside the reconnection window. */
   @type("boolean") connected: boolean = true;
+
+  /**
+   * Which character the player wears — one of `AVATAR_IDS` (src/rooms/avatars.ts),
+   * from the `avatar` join option. Cosmetic: the Egrang lanes render it. Declared
+   * last so every older field keeps its index in both games' decoders.
+   */
+  @type("string") avatar: string = "jawa";
 }

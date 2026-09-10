@@ -12,6 +12,7 @@ import {
  */
 import { DakonRoom } from "./rooms/DakonRoom.js";
 import { EgrangRoom } from "./rooms/EgrangRoom.js";
+import { MuseumRoom } from "./rooms/MuseumRoom.js";
 import { clearLiveSessions } from "./db/sessions.js";
 
 const server = defineServer({
@@ -20,7 +21,8 @@ const server = defineServer({
      */
     rooms: {
         dakon: defineRoom(DakonRoom),
-        egrang: defineRoom(EgrangRoom)
+        egrang: defineRoom(EgrangRoom),
+        museum: defineRoom(MuseumRoom)
     },
 
     /**
