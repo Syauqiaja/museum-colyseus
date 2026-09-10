@@ -13,6 +13,13 @@ export class MuseumVisitor extends Schema {
 
   /** Which character the visitor wears — one of `AVATAR_IDS` (src/rooms/avatars.ts). Last, so older fields keep their index. */
   @type("string") avatar: string = "jawa";
+
+  /**
+   * `""` while walking the hall; the game room name (`"dakon"`, `"egrang"`) while
+   * away playing it — the avatar stays where they left, tagged. One of
+   * `MUSEUM_ACTIVITIES` (src/rooms/museumStations.ts). Last, as `avatar` is.
+   */
+  @type("string") activity: string = "";
 }
 
 /**

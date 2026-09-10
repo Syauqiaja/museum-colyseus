@@ -86,6 +86,108 @@ describe("MuseumRoom", () => {
     assert.strictEqual(room.clients.length, 1, "B is still walking");
     void b;
   });
+
+  describe("interactions", () => {
+    it("relays an exhibit set off to the others, not back to the sender", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const b = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "B" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+
+      a.send("move", { x: 0, y: 0, z: 0, yaw: 0 });
+      await room.waitForMessage("move");
+
+      let echoed = false;
+      a.onMessage("interacted", () => (echoed = true));
+      const relayed = nextMessage(b, "interacted");
+
+      a.send("interact", { station: "engklek", index: 7 });
+
+      assert.deepStrictEqual(await relayed, { sessionId: a.sessionId, station: "engklek", index: 7 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.strictEqual(echoed, false, "the sender already played it");
+    });
+
+    it("rejects an unknown station or a petak the court does not have", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+      a.send("move", { x: 0, y: 0, z: 0, yaw: 0 });
+      await room.waitForMessage("move");
+
+      for (const bad of [{ station: "video", index: 0 }, { station: "toString", index: 0 },
+                         { station: "engklek", index: 8 }, { station: "gong", index: 1 },
+                         { station: "gong", index: 0.5 }]) {
+        const error = nextMessage(a, "error");
+        a.send("interact", bad);
+        assert.strictEqual((await error)?.code, "invalid_interact", JSON.stringify(bad));
+      }
+    });
+
+    it("refuses an interaction from a visitor who has not yet appeared", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+
+      const error = nextMessage(a, "error");
+      a.send("interact", { station: "gong", index: 0 });
+
+      assert.strictEqual((await error)?.code, "invalid_interact");
+    });
+
+    it("turns a flood away with too_fast", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+      a.send("move", { x: 0, y: 0, z: 0, yaw: 0 });
+      await room.waitForMessage("move");
+
+      const error = nextMessage(a, "error");
+      for (let i = 0; i < 9; i++) a.send("interact", { station: "gasing", index: 0 });
+
+      assert.strictEqual((await error)?.code, "too_fast");
+    });
+  });
+
+  describe("activity", () => {
+    it("marks a visitor away playing a game and back again, keeping them listed", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+      a.send("move", { x: 3, y: 0, z: 3, yaw: 0 });
+      await room.waitForMessage("move");
+
+      a.send("activity", { game: "dakon" });
+      await room.waitForMessage("activity");
+      assert.strictEqual(room.state.visitors.get(a.sessionId)?.activity, "dakon");
+      assert.strictEqual(room.state.visitors.get(a.sessionId)?.x, 3, "still standing where they left");
+
+      a.send("activity", { game: "" });
+      await room.waitForMessage("activity");
+      assert.strictEqual(room.state.visitors.get(a.sessionId)?.activity, "");
+    });
+
+    it("lets no one set off an exhibit while away", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+      a.send("move", { x: 0, y: 0, z: 0, yaw: 0 });
+      await room.waitForMessage("move");
+      a.send("activity", { game: "egrang" });
+      await room.waitForMessage("activity");
+
+      const error = nextMessage(a, "error");
+      a.send("interact", { station: "gong", index: 0 });
+
+      assert.strictEqual((await error)?.code, "invalid_interact");
+    });
+
+    it("rejects a game the hall has no doorway for", async () => {
+      const a = await colyseus.sdk.joinOrCreate<MuseumState>("museum", { displayName: "A" });
+      const room = colyseus.getRoomById<MuseumState>(a.roomId);
+      a.send("move", { x: 0, y: 0, z: 0, yaw: 0 });
+      await room.waitForMessage("move");
+
+      const error = nextMessage(a, "error");
+      a.send("activity", { game: "catur" });
+
+      assert.strictEqual((await error)?.code, "invalid_activity");
+      assert.strictEqual(room.state.visitors.get(a.sessionId)?.activity, "");
+    });
+  });
 });
 
 function nextMessage(room: any, type: string): Promise<any> {

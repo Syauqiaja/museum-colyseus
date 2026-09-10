@@ -72,7 +72,7 @@ Build and upload:
 
 ## 3. Exhibition Museum scene
 
-`MuseumPresence` (on the player rig) calls `JoinOrCreate<MuseumState>("museum", { displayName })` on the shared `ColyseusNetManager` client, sends `move` `{ x, y, z, yaw }` up to 10×/s, and draws a `MuseumVisitorAvatar` per other `state.visitors` entry, 200 ms in the past and interpolated between received positions. It bypasses `ColyseusNetManager`'s create/join helpers so the presence room is never recorded as the player's game seat. No server reachable → the museum is walked alone. Contract: [protocol.md](protocol.md#exhibition-museum-scene).
+`MuseumPresenceLink` (a `DontDestroyOnLoad` object) calls `JoinOrCreate<MuseumState>("museum", { displayName, avatar })` on the shared `ColyseusNetManager` client and holds the room for the whole visit; `MuseumPresence` (on the Museum scene's player rig) sends `move` `{ x, y, z, yaw }` up to 10×/s through it and draws a `MuseumVisitorAvatar` per other `state.visitors` entry, 200 ms in the past and interpolated between received positions. It bypasses `ColyseusNetManager`'s create/join helpers so the presence room is never recorded as the player's game seat. Through a doorway the room stays open and the visitor sends `activity { game }` — others see them idle at the doorway, tagged — and on return they reappear at that spot and send `activity ""`; the room is left on the way to MainMenu. The gallery's gong, gasing, tembang and engklek court are shared via `interact` / `interacted`. No server reachable → the museum is walked alone. Contract: [protocol.md](protocol.md#exhibition-museum-scene).
 
 ## 4. Creating / joining a room
 
