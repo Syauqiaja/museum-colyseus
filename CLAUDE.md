@@ -37,4 +37,4 @@ All project knowledge, decisions, and agent instructions live in [`docs/`](docs/
 
 ## Deployment context
 
-Single self-hosted VPS serves both public web players and museum kiosks. Same box runs the Colyseus server *and* nginx serving the static Unity WebGL build, on two hostnames: `museum.fajrsyauqi.com` (client) and `api.museum.fajrsyauqi.com` (`wss://` API), Let's Encrypt TLS. This repo is backend only — the Unity project stays separate, only its build output is copied to the VPS. Topology: [`docs/architecture.md`](docs/architecture.md). Step-by-step deploy (build, PM2, env, nginx/TLS): [`docs/deployment.md`](docs/deployment.md).
+Single self-hosted VPS serves both public web players and museum kiosks. Same box runs the Colyseus server *and* nginx serving the static Unity WebGL build, on two hostnames: `museumethnofun.com` (client) and `api.museumethnofun.com` (`wss://` API), Let's Encrypt TLS. This repo is backend only — the Unity project stays separate, only its build output is copied to the VPS. Topology: [`docs/architecture.md`](docs/architecture.md). Step-by-step deploy (build, PM2, env, nginx/TLS): [`docs/deployment.md`](docs/deployment.md).

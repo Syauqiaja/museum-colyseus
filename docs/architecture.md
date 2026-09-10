@@ -39,7 +39,7 @@ Edge cases to handle per room type: room full, room not found/expired, host disc
 
 ## Deployment topology
 
-One self-hosted VPS runs everything: the Colyseus server **and** nginx serving the static Unity WebGL build, on two hostnames pointing at the same box — `museum.fajrsyauqi.com` for the client, `api.museum.fajrsyauqi.com` for the game server. Both public web players and museum kiosks use the same URLs. TLS (Let's Encrypt) is required since browsers require `wss://` from an `https://` page.
+One self-hosted VPS runs everything: the Colyseus server **and** nginx serving the static Unity WebGL build, on two hostnames pointing at the same box — `museumethnofun.com` for the client, `api.museumethnofun.com` for the game server. Both public web players and museum kiosks use the same URLs. TLS (Let's Encrypt) is required since browsers require `wss://` from an `https://` page.
 
 The Unity WebGL project itself is still a separate repo (see [boundaries.md](boundaries.md)) — only its build output is copied onto this VPS.
 

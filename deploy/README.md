@@ -4,8 +4,8 @@ One VPS serves both halves of the project:
 
 | Host | Serves | Backed by |
 |---|---|---|
-| `museum.fajrsyauqi.com` | Unity WebGL client | Nginx static files from `/var/www/museum` |
-| `api.museum.fajrsyauqi.com` | Colyseus rooms + matchmaking | Node under PM2 on `127.0.0.1:2567`, proxied |
+| `museumethnofun.com` | Unity WebGL client | Nginx static files from `/var/www/museum` |
+| `api.museumethnofun.com` | Colyseus rooms + matchmaking | Node under PM2 on `127.0.0.1:2567`, proxied |
 
 Split hosts so the client can move to a CDN later without touching the client's
 `ServerConfig` endpoint.
@@ -25,8 +25,8 @@ Wait for propagation before running certbot — it validates over HTTP against
 these names.
 
 ```bash
-dig +short museum.fajrsyauqi.com
-dig +short api.museum.fajrsyauqi.com
+dig +short museumethnofun.com
+dig +short api.museumethnofun.com
 ```
 
 ## 2. VPS prerequisites
@@ -100,11 +100,11 @@ Order matters: **certificate first, site config second.** The config ships with
 explicit 443 blocks pointing at the cert, so certbot never needs to rewrite it.
 
 ```bash
-sudo certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
+sudo certbot certonly --nginx -d museumethnofun.com -d api.museumethnofun.com -d www.museumethnofun.com
 
 sudo mkdir -p /var/www/museum
-sudo cp deploy/nginx/museum.fajrsyauqi.com.conf /etc/nginx/sites-available/
-sudo ln -s ../sites-available/museum.fajrsyauqi.com.conf /etc/nginx/sites-enabled/
+sudo cp deploy/nginx/museumethnofun.com.conf /etc/nginx/sites-available/
+sudo ln -s ../sites-available/museumethnofun.com.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -118,14 +118,14 @@ Renewal is a systemd timer installed with the certbot package; confirm with
 never edits site configs, so it is safe. Do **not** re-run `certbot --nginx`
 after the site is installed — it appends duplicate 443 server blocks.
 
-### This VPS is shared with `qurantv_webrtc`
+### The previous VPS was shared with `qurantv_webrtc` (not the current box)
 
 Two consequences, both already hit once:
 
 - `qurantv_webrtc` holds `listen 80 default_server` and `server_name _`, so it
   catches every hostname without an explicit block. When certbot ran *before*
-  this site existed, it injected `museum.fajrsyauqi.com` /
-  `api.museum.fajrsyauqi.com` server blocks into
+  this site existed, it injected `museumethnofun.com` /
+  `api.museumethnofun.com` server blocks into
   `/etc/nginx/sites-available/qurantv_webrtc` — serving the QuranTV site on the
   museum hostnames. Those cloned blocks were removed by hand. If you ever re-run
   `certbot --nginx` while the museum site is disabled, check that file again.
@@ -156,12 +156,49 @@ Unity -quit -batchmode -projectPath . -executeMethod Museum.Build.Editor.BuildWe
 
 The build script forces Brotli compression, "Explicitly Thrown Exceptions Only",
 and flips `ServerConfig.useDevEndpoint` off for the duration of the build, so
-the shipped client points at `wss://api.museum.fajrsyauqi.com`.
+the shipped client points at `wss://api.museumethnofun.com`.
 
-Upload:
+Upload. **Two flags matter, and both were learned the hard way (2026-09-09):**
 
 ```bash
-rsync -avz --delete Builds/WebGL/ <user>@<VPS_IP>:/var/www/museum/
+chmod -R a+rX Builds/WebGL          # every build, not once — see below
+rsync -avz --partial --exclude='.DS_Store' \
+  Builds/WebGL/ <user>@<VPS_IP>:/var/www/museum/
+ssh <host> 'chmod -R a+rX /var/www/museum'
+```
+
+- **`chmod` after *every* build.** Unity writes the `.br` files mode `600`. Nginx
+  runs as `www-data`, cannot read them, and returns its 403 HTML page — which the
+  Unity loader then tries to parse as game data:
+  `Unknown data format (id="<html>\n<head><t")`. This is not a one-time fix to the
+  output folder; a rebuild recreates the files at `600` again. Do it on both ends:
+  locally before sending (`rsync -a` preserves the mode) and on the server after.
+  macOS ships **openrsync**, which has no `--chmod` flag, so this is the only way
+  short of `brew install rsync`.
+- **No `--delete`.** It removes the old `Build/` files *before* the new ones finish
+  arriving. If the transfer then dies — and a 142 MB payload over a
+  `ControlMaster` session is long enough for that to happen — the site is left
+  with an `index.html` pointing at four files that no longer exist, and every
+  `Build/` request 404s. Upload first; clean up afterwards if you actually need to.
+  Note the payload is *renamed* when built via `BuildWebGL` (`WebGL.data.br`)
+  versus the Build Profile window (`<Product Name>.data.br`), so stale files from
+  the other naming scheme can accumulate — remove those in a separate, deliberate
+  step once the new build is confirmed serving.
+- **`--partial`** keeps what transferred, so a dropped connection resumes instead
+  of restarting 142 MB.
+
+Verify the upload byte-for-byte rather than trusting the transfer — and **not**
+with `curl --compressed`, which on macOS has no brotli support and silently
+returns an empty body (you will hash `e3b0c442…855`, the SHA-256 of nothing, and
+think the file is wrong):
+
+```bash
+for f in WebGL.data.br WebGL.wasm.br WebGL.framework.js.br; do
+  L=$(shasum -a256 "Builds/WebGL/Build/$f" | awk '{print $1}')
+  R=$(curl -s -H 'Accept-Encoding: br' \
+        "https://museumethnofun.com/Build/$f" -o - | shasum -a256 | awk '{print $1}')
+  [ "$L" = "$R" ] && echo "$f MATCH" || echo "$f MISMATCH"
+done
 ```
 
 The Nginx config declares the right `Content-Encoding` for both Unity naming
@@ -173,14 +210,14 @@ Brotli-compressed builds served without those headers fail with
 Check a build file's headers after uploading:
 
 ```bash
-curl -sI https://museum.fajrsyauqi.com/Build/WebGL.wasm.br | grep -i "content-encoding\|content-type"
+curl -sI https://museumethnofun.com/Build/WebGL.wasm.br | grep -i "content-encoding\|content-type"
 ```
 
 ## 7. Smoke test
 
-1. `https://museum.fajrsyauqi.com` loads and reaches the main menu.
+1. `https://museumethnofun.com` loads and reaches the main menu.
 2. Browser devtools → Network shows the socket to
-   `wss://api.museum.fajrsyauqi.com` upgrading (status 101), no mixed-content
+   `wss://api.museumethnofun.com` upgrading (status 101), no mixed-content
    or CORS errors in the console.
 3. Two tabs create/join the same room code and see each other.
 4. Play a full Dakon game; refresh mid-game and confirm reconnect.
@@ -193,8 +230,15 @@ curl -sI https://museum.fajrsyauqi.com/Build/WebGL.wasm.br | grep -i "content-en
 cd /srv/museum && git pull && npm ci && npm run build && pm2 restart colyseus-app
 ```
 
-Client: rebuild in Unity, rsync again. `index.html` is sent `no-cache` and the
-`Build/` files are immutable-cached, so a redeploy takes effect on next load.
+Client: rebuild in Unity, rsync again (§6 — `chmod` after the build, no
+`--delete`). `index.html` is sent `no-cache` and the `Build/` files are
+immutable-cached, so a redeploy takes effect on next load.
+
+**Test a redeploy in a private window.** `Build/` files carry
+`Cache-Control: public, max-age=31536000, immutable`. A browser that cached a
+broken response — a 403 from the permission trap, or a 404 from a half-finished
+`--delete` — keeps serving it, and Cmd+Shift+R does *not* evict it; that is what
+`immutable` means. Clear via DevTools → Application → Clear site data.
 
 ## Known constraints
 
@@ -209,4 +253,4 @@ Client: rebuild in Unity, rsync again. `index.html` is sent `no-cache` and the
   matchmaking response and preflight. Adding the same headers in nginx sends two
   of each and browsers reject the request. To lock the origin down, override
   `matchMaker.controller.getCorsHeaders` in `src/app.config.ts`.
-- **Shared box.** `qurantv_webrtc` owns `default_server`; see §5.
+- **Dedicated box.** The current VPS (212.85.25.177) hosts only this project; the §5 `qurantv_webrtc` notes are history from the previous one.

@@ -11,16 +11,16 @@ Use the **official Colyseus Unity SDK**, matched to the server's major version (
 Don't hardcode the server URL in scene objects. Use a single config point (e.g. a ScriptableObject or a build-time constant) with:
 
 - **Dev:** `ws://localhost:2567` (matches `npm start`, see root README).
-- **Production:** `wss://api.museum.fajrsyauqi.com` — a **different hostname from the one serving this WebGL build** (`museum.fajrsyauqi.com`), though both are the same VPS. See [deployment.md](deployment.md). Must be `wss://` (secure), not `ws://`, since the client is served over `https://` and browsers block mixed-content WebSocket connections. Cross-origin is fine: the matchmaker sends permissive CORS headers.
+- **Production:** `wss://api.museumethnofun.com` — a **different hostname from the one serving this WebGL build** (`museumethnofun.com`), though both are the same VPS. See [deployment.md](deployment.md). Must be `wss://` (secure), not `ws://`, since the client is served over `https://` and browsers block mixed-content WebSocket connections. Cross-origin is fine: the matchmaker sends permissive CORS headers.
 
-Don't point the client at a subpath of the client's own host (`wss://museum.fajrsyauqi.com/api`) — the Unity SDK builds its endpoint from host + port and has no path setting, unlike the JS SDK.
+Don't point the client at a subpath of the client's own host (`wss://museumethnofun.com/api`) — the Unity SDK builds its endpoint from host + port and has no path setting, unlike the JS SDK.
 
 Colyseus SDK client construction:
 
 ```csharp
 using Colyseus;
 
-var client = new ColyseusClient(serverUrl); // "ws://localhost:2567" or "wss://api.museum.fajrsyauqi.com"
+var client = new ColyseusClient(serverUrl); // "ws://localhost:2567" or "wss://api.museumethnofun.com"
 ```
 
 ## 2b. Deployed server — facts for the client project
@@ -30,8 +30,8 @@ planned:
 
 | Thing | Value |
 |---|---|
-| WebSocket endpoint | `wss://api.museum.fajrsyauqi.com` |
-| Client is served from | `https://museum.fajrsyauqi.com` (same VPS, `/var/www/museum`) |
+| WebSocket endpoint | `wss://api.museumethnofun.com` |
+| Client is served from | `https://museumethnofun.com` (same VPS, `/var/www/museum`) |
 | Registered room names | `dakon` (2 seats), `egrang` (3 seats, `minPlayers` 2) — both fully implemented |
 | Room code | 6 chars, alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I/L/O/0/1) |
 | Join options | `{ private?: bool, displayName?: string (≤32 chars), playerId?: string }` |
@@ -50,14 +50,14 @@ steps, and places 1–3, with the race ending the moment the first racer crosses
 Health checks the client project can hit directly:
 
 ```bash
-curl -s https://api.museum.fajrsyauqi.com/hi
-curl -s -X POST https://api.museum.fajrsyauqi.com/matchmake/joinOrCreate/dakon \
+curl -s https://api.museumethnofun.com/hi
+curl -s -X POST https://api.museumethnofun.com/matchmake/joinOrCreate/dakon \
   -H 'Content-Type: application/json' -d '{}'
 ```
 
 Build and upload:
 
-- Build WebGL with the endpoint constant pointing at `wss://api.museum.fajrsyauqi.com`
+- Build WebGL with the endpoint constant pointing at `wss://api.museumethnofun.com`
   (not a subpath of the client host — the Unity SDK has no path setting).
 - Any compression setting works: nginx serves `*.unityweb`, `*.br` and `*.gz`
   with the correct `Content-Encoding`.
@@ -139,7 +139,7 @@ Call `room.Leave()` on explicit "return to lobby"/"quit" actions — don't just 
 
 ## Open items (not yet resolved — don't guess)
 
-- **Engklak only.** Its room name, state schema and message set do not exist and its rules were never supplied — see [games/engklak.md](games/engklak.md). Everything else here is settled: the room names (`dakon`, `egrang`), both schemas, and the production domain `api.museum.fajrsyauqi.com`.
+- **Engklak only.** Its room name, state schema and message set do not exist and its rules were never supplied — see [games/engklak.md](games/engklak.md). Everything else here is settled: the room names (`dakon`, `egrang`), both schemas, and the production domain `api.museumethnofun.com`.
 
 ## Client status (as built)
 

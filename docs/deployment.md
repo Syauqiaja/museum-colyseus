@@ -11,11 +11,11 @@ hostnames, one box:
 
 | Hostname | Serves | Backed by |
 |---|---|---|
-| `museum.fajrsyauqi.com` | Unity WebGL build | nginx static, `/var/www/museum` |
-| `api.museum.fajrsyauqi.com` | Colyseus | nginx → `127.0.0.1:2567` |
+| `museumethnofun.com` | Unity WebGL build | nginx static, `/var/www/museum` |
+| `api.museumethnofun.com` | Colyseus | nginx → `127.0.0.1:2567` |
 
-The apex `fajrsyauqi.com` is deliberately left free for anything else. DNS setup
-under [Hostnames](#hostnames).
+The domain is the project's own, so the client takes the apex; `www` redirects to
+it. DNS setup under [Hostnames](#hostnames).
 
 Why two hostnames rather than one host with the game server on a subpath: the
 JS SDK accepts a `pathname`, but the **Unity C# SDK builds its endpoint from
@@ -51,13 +51,15 @@ comfortably; add Redis first if that ever stops being true.
 
 ## Hostnames
 
-The project uses two subdomains of `fajrsyauqi.com`. At the registrar's DNS
-panel, add two **A records** pointing at the VPS's public IPv4 address:
+The project uses the apex `museumethnofun.com` plus `api` and `www`. At the
+registrar's DNS panel, add three **A records** pointing at the VPS's public IPv4
+address:
 
 | Type | Name | Value |
 |---|---|---|
-| A | `museum` | `YOUR_VPS_IP` |
-| A | `api.museum` | `YOUR_VPS_IP` |
+| A | `@` | `YOUR_VPS_IP` |
+| A | `api` | `YOUR_VPS_IP` |
+| A | `www` | `YOUR_VPS_IP` |
 
 (Add matching `AAAA` records if the VPS has IPv6 and you want it reachable that
 way; skip them entirely otherwise — an `AAAA` record pointing nowhere makes
@@ -67,8 +69,8 @@ Verify before running certbot — a certificate request against DNS that hasn't
 propagated just burns a rate-limit slot:
 
 ```bash
-dig +short museum.fajrsyauqi.com
-dig +short api.museum.fajrsyauqi.com
+dig +short museumethnofun.com
+dig +short api.museumethnofun.com
 ```
 
 Both must print the VPS IP. Propagation is usually minutes, occasionally an hour.
@@ -158,7 +160,7 @@ a first deploy, worth turning off once the nginx side is proven.
 
 ## nginx + TLS
 
-The site config is a file in this repo — [`deploy/nginx/museum.fajrsyauqi.com.conf`](../deploy/nginx/museum.fajrsyauqi.com.conf) —
+The site config is a file in this repo — [`deploy/nginx/museumethnofun.com.conf`](../deploy/nginx/museumethnofun.com.conf) —
 not something to hand-write on the box, so that fixes to it are versioned. It
 carries explicit 443 blocks, the WebSocket upgrade plumbing, the long
 `proxy_read_timeout` that idle lobbies need, basic-auth on `/monitor`, and the
@@ -167,19 +169,19 @@ carries explicit 443 blocks, the WebSocket upgrade plumbing, the long
 Certificate first, config second:
 
 ```bash
-sudo certbot --nginx -d museum.fajrsyauqi.com -d api.museum.fajrsyauqi.com
+sudo certbot certonly --nginx -d museumethnofun.com -d api.museumethnofun.com -d www.museumethnofun.com
 
 sudo mkdir -p /var/www/museum
-sudo cp deploy/nginx/museum.fajrsyauqi.com.conf /etc/nginx/sites-available/
-sudo ln -s ../sites-available/museum.fajrsyauqi.com.conf /etc/nginx/sites-enabled/
+sudo cp deploy/nginx/museumethnofun.com.conf /etc/nginx/sites-available/
+sudo ln -s ../sites-available/museumethnofun.com.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Put `museum.fajrsyauqi.com` first in the certbot command — that name decides the
+Put `museumethnofun.com` first in the certbot command — that name decides the
 `/etc/letsencrypt/live/<name>/` directory the config points at. One certificate
 covers both hostnames.
 
-Two traps this box has already sprung, both written up in
+Two traps the previous VPS (shared with another project) sprung, both written up in
 [`deploy/README.md`](../deploy/README.md) §5:
 
 - **Certbot writes into whatever block already matches.** This VPS also hosts
@@ -192,7 +194,7 @@ Two traps this box has already sprung, both written up in
   only replaces certificate files and never edits configs, so it is safe; it
   reloads nginx, not the game server, leaving live matches alone.
 
-The Unity client's production endpoint is then `wss://api.museum.fajrsyauqi.com` —
+The Unity client's production endpoint is then `wss://api.museumethnofun.com` —
 see [unity-integration.md](unity-integration.md) §2.
 
 ## CORS — leave it to Colyseus
@@ -225,14 +227,14 @@ not be reachable from outside the box; bind MySQL to `127.0.0.1`.
 ## Health check
 
 ```bash
-curl -sS https://api.museum.fajrsyauqi.com/hi     # scaffold route, proves the proxy works
-curl -sSI https://museum.fajrsyauqi.com/          # client is served
+curl -sS https://api.museumethnofun.com/hi     # scaffold route, proves the proxy works
+curl -sSI https://museumethnofun.com/          # client is served
 pm2 logs colyseus-app --lines 50               # boot errors, DB connection failures
 ```
 
 If the Unity page loads but stalls on the progress bar, it is almost always the
 compression headers — check that `Build/*.br` responses carry
-`Content-Encoding: br` (`curl -sSI https://museum.fajrsyauqi.com/Build/xxx.wasm.br`).
+`Content-Encoding: br` (`curl -sSI https://museumethnofun.com/Build/xxx.wasm.br`).
 
 A dead database does not stop the server: writes go through `withDb()`, which
 logs and swallows failures. If matches play but no rows appear, look at the logs

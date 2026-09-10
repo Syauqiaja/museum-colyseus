@@ -60,7 +60,7 @@ const server = defineServer({
          * The panel lists every live room and can forcibly dispose them, so it
          * stays off unless explicitly switched on. Enable per-environment with
          * MONITOR_ENABLED=1, and put HTTP basic auth in front of it at the
-         * reverse proxy (see deploy/nginx/museum.fajrsyauqi.com.conf).
+         * reverse proxy (see deploy/nginx/museumethnofun.com.conf).
          *
          * Read more: https://docs.colyseus.io/tools/monitoring/#restrict-access-to-the-panel-using-a-password
          */
