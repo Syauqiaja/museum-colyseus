@@ -1,0 +1,47 @@
+# The `museum` Docker Compose project on the VPS — lives at /docker/museum/docker-compose.yml.
+#
+# The box's ports 80/443 belong to Hostinger's Traefik (its own compose project,
+# traefik-3z6t, host-networked, Docker-label provider, ACME resolver `letsencrypt`).
+# Nothing here publishes a port; Traefik discovers these containers by their labels,
+# terminates TLS, and issues/renews every certificate itself.
+#
+#   web  -> museumethnofun.com (+ www redirect): the Unity WebGL build, served by nginx
+#   api  -> api.museumethnofun.com: the Colyseus server, which runs on the HOST under PM2
+#
+# Apply after editing:  cd /docker/museum && docker compose config --quiet && docker compose up -d
+services:
+  web:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - /docker/museum/site:/usr/share/nginx/html:ro
+      - /docker/museum/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.museum.rule=Host(`museumethnofun.com`) || Host(`www.museumethnofun.com`)
+      - traefik.http.routers.museum.entrypoints=websecure
+      - traefik.http.routers.museum.tls.certresolver=letsencrypt
+      - traefik.http.routers.museum.middlewares=museum-www
+      - traefik.http.services.museum.loadbalancer.server.port=80
+      # www → apex, so the game has exactly one origin (CORS on the video host, cookies, cache)
+      - traefik.http.middlewares.museum-www.redirectregex.regex=^https://www\.museumethnofun\.com/(.*)
+      - traefik.http.middlewares.museum-www.redirectregex.replacement=https://museumethnofun.com/$${1}
+      - traefik.http.middlewares.museum-www.redirectregex.permanent=true
+
+  # api.museumethnofun.com -> Colyseus under PM2 on the host (port 2567).
+  # Does nothing itself; only carries the Traefik labels. Being host-networked,
+  # Traefik (also host-networked) proxies it to 127.0.0.1:2567. Traefik passes
+  # WebSocket upgrades through as-is, and an idle socket survives (checked: 75 s
+  # with no traffic, past Traefik v3's 60 s entrypoint read timeout).
+  api:
+    image: alpine:3
+    command: ["sleep", "infinity"]
+    init: true
+    network_mode: host
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.museum-api.rule=Host(`api.museumethnofun.com`)
+      - traefik.http.routers.museum-api.entrypoints=websecure
+      - traefik.http.routers.museum-api.tls.certresolver=letsencrypt
+      - traefik.http.services.museum-api.loadbalancer.server.port=2567

@@ -6,13 +6,13 @@ serves both public web players and museum kiosks — see
 
 The Unity WebGL client is **not** in this repo (it stays a separate Unity
 project — see [boundaries.md](boundaries.md)), but its **build output is served
-from this same VPS** by the same nginx that fronts the game server. Two
-hostnames, one box:
+from this same VPS**, behind the same Traefik reverse proxy that fronts the game
+server. Two hostnames, one box:
 
 | Hostname | Serves | Backed by |
 |---|---|---|
-| `museumethnofun.com` | Unity WebGL build | nginx static, `/var/www/museum` |
-| `api.museumethnofun.com` | Colyseus | nginx → `127.0.0.1:2567` |
+| `museumethnofun.com` | Unity WebGL build | `web` container (nginx), `/docker/museum/site` |
+| `api.museumethnofun.com` | Colyseus | Traefik → PM2 on the host, `127.0.0.1:2567` |
 
 The domain is the project's own, so the client takes the apex; `www` redirects to
 it. DNS setup under [Hostnames](#hostnames).
@@ -45,7 +45,9 @@ comfortably; add Redis first if that ever stops being true.
 - Node.js >= 20.9 (matches `engines` in `package.json`)
 - PM2 (`npm i -g pm2`)
 - MySQL 8 (skip if running with `DB_DISABLED=1`)
-- nginx + certbot
+- A TLS reverse proxy that passes WebSocket upgrades — on the production box,
+  Hostinger's Traefik, which owns ports 80/443 and issues certificates itself. Do
+  not also install nginx/certbot on the host; they cannot bind those ports.
 - Two hostnames pointing at the box — browsers refuse `ws://` from an `https://`
   page, so TLS is not optional. See below.
 
@@ -65,8 +67,9 @@ address:
 way; skip them entirely otherwise — an `AAAA` record pointing nowhere makes
 browsers stall before falling back to IPv4.)
 
-Verify before running certbot — a certificate request against DNS that hasn't
-propagated just burns a rate-limit slot:
+Verify before the first HTTPS request — Traefik asks Let's Encrypt for a
+certificate on first use, and a request against DNS that hasn't propagated just
+burns a rate-limit slot:
 
 ```bash
 dig +short museumethnofun.com
@@ -76,8 +79,9 @@ dig +short api.museumethnofun.com
 Both must print the VPS IP. Propagation is usually minutes, occasionally an hour.
 
 If the domain is behind Cloudflare's proxy (orange cloud), WebSockets do pass
-through, but set SSL/TLS mode to **Full (strict)** and keep certbot's certificate
-on the origin. Grey-cloud (DNS only) is simpler for the API subdomain and avoids
+through, but set SSL/TLS mode to **Full (strict)** and keep Traefik's certificate
+on the origin (switch its resolver to the DNS-01 challenge, since HTTP-01 cannot
+reach a proxied origin). Grey-cloud (DNS only) is simpler for the API subdomain and avoids
 Cloudflare's idle-connection timeouts on long-lived lobby sockets.
 
 For a venue with no internet at all, see
@@ -121,10 +125,12 @@ npm run db:migrate      # forward-only, already-applied migrations are skipped
 pm2 restart colyseus-app
 ```
 
-The repo is not a git checkout on the server by default — transfer with `rsync`
-(or `git init` + a remote and pull, if you prefer). Either way `build/` is
-produced on the server; don't ship a locally built one against different Node
-minor versions.
+On the production box all of this is scripted: [`deploy/setup-vps.sh`](../deploy/setup-vps.sh)
+(`packages`, then `app`) clones the repo to `/srv/museum`, generates the DB
+credentials into `.env.production`, and runs the steps above as a dedicated
+`museum` user. Redeploys are a `git pull` in that checkout — see
+[`deploy/README.md`](../deploy/README.md). `build/` is always produced on the
+server; don't ship a locally built one against different Node minor versions.
 
 Restarting drops every live socket, and rooms are in-memory only: a restart ends
 all matches in progress. Deploy when the museum is closed, or accept the
@@ -137,8 +143,13 @@ The Unity project lives elsewhere; only its **build output** lands here. In Unit
 a `Build/` subfolder. Ship that folder to the VPS:
 
 ```bash
-rsync -av --delete path/to/WebGLBuild/ user@vps:/var/www/museum/
+chmod -R a+rX path/to/WebGLBuild
+rsync -avz --partial --exclude='.DS_Store' path/to/WebGLBuild/ root@vps:/docker/museum/site/
+ssh root@vps 'chmod -R a+rX /docker/museum/site'
 ```
+
+(`chmod` on every build and no `--delete` — both are traps already sprung; the
+reasons are in [`deploy/README.md`](../deploy/README.md) §4.)
 
 Two Unity build settings decide how much nginx configuration you need
 (*Project Settings → Player → Publishing Settings*):
@@ -151,50 +162,35 @@ Two Unity build settings decide how much nginx configuration you need
   "Unable to parse Build/*.wasm" or an unhandled-compression error.
 
 Leaving *Decompression Fallback* on instead produces `*.unityweb` filenames. The
-shipped nginx config handles all three layouts, so no server-side change is
-needed whichever you pick.
+`web` container's [`nginx.conf`](../deploy/traefik/nginx.conf) handles the
+Brotli/`*.br` layout that `BuildWebGL` produces (and plain `.wasm`); switching to
+`*.unityweb` or `*.gz` needs matching `location` blocks added there first.
 
 Leaving *Decompression Fallback* **on** makes the build work on any server
 without configuration, at the cost of a bigger loader and slower start — fine as
 a first deploy, worth turning off once the nginx side is proven.
 
-## nginx + TLS
+## Traefik + TLS
 
-The site config is a file in this repo — [`deploy/nginx/museumethnofun.com.conf`](../deploy/nginx/museumethnofun.com.conf) —
-not something to hand-write on the box, so that fixes to it are versioned. It
-carries explicit 443 blocks, the WebSocket upgrade plumbing, the long
-`proxy_read_timeout` that idle lobbies need, basic-auth on `/monitor`, and the
-`Content-Encoding` rules for every Unity compression layout.
+Ports 80/443 on the production box belong to Hostinger's Traefik (its own compose
+project): host-networked, routes read from Docker labels only, HTTP → HTTPS
+redirect, and an ACME resolver `letsencrypt` that issues and renews certificates
+per hostname on first use. There is no certbot and no host nginx.
 
-Certificate first, config second:
+The routes are labels on the `museum` compose project, versioned in
+[`deploy/traefik/`](../deploy/traefik/) (on the box: `/docker/museum/`), so fixes
+to them are reviewed rather than hand-edited on the server:
 
-```bash
-sudo certbot certonly --nginx -d museumethnofun.com -d api.museumethnofun.com -d www.museumethnofun.com
+- `web` (`nginx:alpine`) — `museumethnofun.com`, plus a `www` → apex redirect
+  middleware; serves the Unity build with the `Content-Encoding` rules it needs.
+- `api` — a do-nothing, host-networked container that exists only to carry the
+  `api.museumethnofun.com` router. Traefik resolves host-networked containers to
+  `127.0.0.1`, so the router's port 2567 reaches the Colyseus process that PM2
+  runs on the host. Traefik passes WebSocket upgrades through with no extra
+  config, and an idle game socket survives its 60 s entrypoint read timeout
+  (checked for 75 s).
 
-sudo mkdir -p /var/www/museum
-sudo cp deploy/nginx/museumethnofun.com.conf /etc/nginx/sites-available/
-sudo ln -s ../sites-available/museumethnofun.com.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-Put `museumethnofun.com` first in the certbot command — that name decides the
-`/etc/letsencrypt/live/<name>/` directory the config points at. One certificate
-covers both hostnames.
-
-Two traps the previous VPS (shared with another project) sprung, both written up in
-[`deploy/README.md`](../deploy/README.md) §5:
-
-- **Certbot writes into whatever block already matches.** This VPS also hosts
-  `qurantv_webrtc`, which owns `listen 80 default_server` / `server_name _`.
-  Running `certbot --nginx` before the museum site existed injected museum server
-  blocks into *that* project's config. Install the site config first, or check
-  that file afterwards.
-- **Do not re-run `certbot --nginx` once the site is installed** — it appends
-  duplicate 443 blocks. Automatic renewal (`certbot renew`, the systemd timer)
-  only replaces certificate files and never edits configs, so it is safe; it
-  reloads nginx, not the game server, leaving live matches alone.
-
-The Unity client's production endpoint is then `wss://api.museumethnofun.com` —
+The Unity client's production endpoint is `wss://api.museumethnofun.com` —
 see [unity-integration.md](unity-integration.md) §2.
 
 ## CORS — leave it to Colyseus
@@ -215,21 +211,22 @@ To restrict which origin may matchmake, override
 - `/monitor` — the Colyseus admin panel: it lists live rooms and lets an operator
   inspect and destroy them. **Two locks, both needed.** Server-side it is only
   mounted when `MONITOR_ENABLED=1` (see [`src/app.config.ts`](../src/app.config.ts)),
-  and the nginx config puts HTTP basic auth in front of it
-  (`sudo htpasswd -c /etc/nginx/.htpasswd-museum admin`). Leave `MONITOR_ENABLED`
+  and a Traefik `basicauth` router must sit in front of it (labels in
+  [`deploy/README.md`](../deploy/README.md) §3). Leave `MONITOR_ENABLED`
   unset unless you actually need the panel.
 - `/playground` — dev tooling, already gated behind `NODE_ENV !== "production"`.
 - `/api/hello`, `/hi` — scaffold leftovers, harmless.
 
-Firewall: expose 443 (and 80 for certbot's renewal challenge). Port 2567 should
-not be reachable from outside the box; bind MySQL to `127.0.0.1`.
+Firewall: expose 443 (and 80 for Traefik's HTTP-01 challenge and redirect). Port
+2567 must not be reachable from outside the box (`ufw` blocks it; verified
+2026-09-11) — Traefik reaches it on loopback. Bind MySQL to `127.0.0.1`.
 
 ## Health check
 
 ```bash
 curl -sS https://api.museumethnofun.com/hi     # scaffold route, proves the proxy works
 curl -sSI https://museumethnofun.com/          # client is served
-pm2 logs colyseus-app --lines 50               # boot errors, DB connection failures
+sudo -u museum pm2 logs colyseus-app --lines 50   # boot errors, DB connection failures
 ```
 
 If the Unity page loads but stalls on the progress bar, it is almost always the
@@ -244,12 +241,13 @@ rather than the room code.
 
 The same build runs on a mini PC or Raspberry Pi at a venue with unreliable
 internet, serving both the client and the game server over the local network.
-Same procedure minus certbot: with no public hostname there is no Let's Encrypt
-certificate, so serve the Unity client over plain `http://192.168.x.x` — a
-non-secure origin may open `ws://`, so the pair still works with no TLS at all.
-Both nginx blocks collapse into one `listen 80` server on the LAN IP, with the
-Colyseus proxy under a distinct port (e.g. `listen 8080`) since there are no
-hostnames to split on. Add this per venue only when a venue actually needs it.
+Same server procedure, but no Traefik or certificates: with no public hostname
+there is no Let's Encrypt certificate, so serve the Unity client over plain
+`http://192.168.x.x` — a non-secure origin may open `ws://`, so the pair still
+works with no TLS at all. A single nginx `listen 80` server on the LAN IP (the
+`web` container's config is a fine base) serves the client, with the Colyseus
+proxy under a distinct port (e.g. `listen 8080`) since there are no hostnames to
+split on. Add this per venue only when a venue actually needs it.
 
 ## Scaling beyond one box
 

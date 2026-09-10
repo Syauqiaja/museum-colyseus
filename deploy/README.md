@@ -1,11 +1,25 @@
-# Deployment runbook — single VPS
+# Deployment runbook — single VPS behind Traefik
 
-One VPS serves both halves of the project:
+One VPS (212.85.25.177, Hostinger) serves both halves of the project:
 
 | Host | Serves | Backed by |
 |---|---|---|
-| `museumethnofun.com` | Unity WebGL client | Nginx static files from `/var/www/museum` |
-| `api.museumethnofun.com` | Colyseus rooms + matchmaking | Node under PM2 on `127.0.0.1:2567`, proxied |
+| `museumethnofun.com` (`www` → apex) | Unity WebGL client | `web` container (`nginx:alpine`) serving `/docker/museum/site` |
+| `api.museumethnofun.com` | Colyseus rooms + matchmaking | Node under PM2 **on the host**, `127.0.0.1:2567` |
+
+**Ports 80/443 belong to Traefik**, not to anything this repo installs. Hostinger's
+Docker template runs it as its own compose project (`/docker/traefik-3z6t`):
+host-networked, Docker-label provider only (`exposedbydefault=false`), HTTP → HTTPS
+redirect, and an ACME resolver named `letsencrypt` that issues and renews every
+certificate. So:
+
+- Do **not** install nginx or certbot on the host. Host nginx cannot bind 80/443
+  (`bind() to 0.0.0.0:80 failed (98: Address already in use)`), and Traefik already
+  owns the certificates.
+- Routes are Docker labels on containers in the `museum` compose project
+  ([`deploy/traefik/`](traefik/) — the file on the box is
+  `/docker/museum/docker-compose.yml`).
+- Don't stop Traefik: it also fronts other projects on the box (e.g. `9router-qkir`).
 
 Split hosts so the client can move to a CDN later without touching the client's
 `ServerConfig` endpoint.
@@ -14,178 +28,132 @@ Split hosts so the client can move to a CDN later without touching the client's
 
 ## 1. DNS
 
-Two A records at the registrar, both pointing at the VPS public IP:
+Three A records at the registrar, all pointing at the VPS public IP:
 
 ```
-museum      A   <VPS_IP>
-api.museum  A   <VPS_IP>
+@    A   <VPS_IP>
+api  A   <VPS_IP>
+www  A   <VPS_IP>
 ```
 
-Wait for propagation before running certbot — it validates over HTTP against
-these names.
+Traefik requests a certificate on the first HTTPS request to each name, over the
+HTTP-01 challenge — so the names must resolve to the box first.
 
 ```bash
-dig +short museumethnofun.com
-dig +short api.museumethnofun.com
+dig +short museumethnofun.com api.museumethnofun.com www.museumethnofun.com
 ```
 
-## 2. VPS prerequisites
+## 2. Game server (host)
+
+Run as root. The script installs MySQL, Node 20 and PM2, opens only SSH and
+80/443 in `ufw`, creates a `museum` user, a `museum_minigames` database and a
+DB user with a generated password (written to `/srv/museum/.env.production`,
+never printed), clones the repo to `/srv/museum`, migrates, builds, and starts
+PM2 with boot survival:
 
 ```bash
-sudo apt update
-sudo apt install -y nginx mysql-server certbot python3-certbot-nginx git apache2-utils
-# Node 20+ (NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-sudo npm install -g pm2
+curl -fsSL https://raw.githubusercontent.com/Syauqiaja/museum-colyseus/main/deploy/setup-vps.sh -o setup-vps.sh
+bash setup-vps.sh packages
+bash setup-vps.sh app            # ends with "local /hi: 200"
 ```
 
-Firewall: allow 80 and 443 only. Port 2567 stays bound to loopback — Nginx is
-the only thing that talks to it.
+Each phase is safe to re-run. PM2 runs as the `museum` user, so its commands need
+that user:
 
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
-sudo ufw enable
+sudo -u museum pm2 ls
+sudo -u museum pm2 logs colyseus-app --lines 50 --nostream
 ```
 
-## 3. Database
+Port 2567 stays closed to the internet (`ufw`); only Traefik, on the same host
+network, reaches it on `127.0.0.1`.
+
+## 3. Traefik routes
 
 ```bash
-sudo mysql
-```
-```sql
-CREATE DATABASE museum_minigames CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'museum'@'localhost' IDENTIFIED BY '<strong-password>';
-GRANT ALL PRIVILEGES ON museum_minigames.* TO 'museum'@'localhost';
-FLUSH PRIVILEGES;
+mkdir -p /docker/museum/site
+cp /srv/museum/deploy/traefik/docker-compose.yml /srv/museum/deploy/traefik/nginx.conf /docker/museum/
+cd /docker/museum && docker compose config --quiet && docker compose up -d
 ```
 
-Leave MySQL bound to `127.0.0.1` (the Debian/Ubuntu default). Nothing outside
-the box needs it.
+- `web` carries the `museumethnofun.com` router and the `www` → apex redirect.
+- `api` is a do-nothing, host-networked `alpine` container that only carries the
+  `api.museumethnofun.com` router. Traefik resolves a host-networked container to
+  `127.0.0.1`, so the router's port `2567` lands on the PM2 process. Traefik's
+  Docker provider cannot route to a non-container on its own; this is the
+  smallest thing that gives it one.
 
-## 4. Server code
-
-The server repo is not yet under version control locally. Initialise and push
-it somewhere private first — deploying by `git pull` beats `scp`, because it
-makes rollback a checkout.
+Verify (the first request may take a few seconds while the certificate is issued):
 
 ```bash
-# on the VPS
-sudo mkdir -p /srv/museum && sudo chown $USER /srv/museum
-git clone <your-remote> /srv/museum
-cd /srv/museum
-
-cp .env.production.example .env.production
-$EDITOR .env.production          # fill DB_PASSWORD and the rest
-
-npm ci
-npm run db:migrate
-npm run build
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup                      # run the command it prints, for boot survival
+curl -sS https://api.museumethnofun.com/hi                    # placeholder greeting
+curl -sSI https://www.museumethnofun.com | grep -i location   # → https://museumethnofun.com/
+docker logs traefik-3z6t-traefik-1 --tail 30                  # if either fails
 ```
 
-Verify locally before involving Nginx:
+Hostinger's Docker Manager also shows (and can edit) the `museum` project. If you
+change it there, copy the result back into `deploy/traefik/` so the repo stays the
+record.
 
-```bash
-curl -s localhost:2567/hi        # expect the placeholder greeting
-pm2 logs colyseus-app --lines 50
+### Monitor panel
+
+Off by default. Both locks are needed: `MONITOR_ENABLED=1` in `.env.production`
+mounts the route, and a Traefik basic-auth router guards it. Add to the `api`
+service's labels (hash from `htpasswd -nB admin`; double every `$` in compose):
+
+```yaml
+      - traefik.http.routers.museum-monitor.rule=Host(`api.museumethnofun.com`) && PathPrefix(`/monitor`)
+      - traefik.http.routers.museum-monitor.entrypoints=websecure
+      - traefik.http.routers.museum-monitor.tls.certresolver=letsencrypt
+      - traefik.http.routers.museum-monitor.middlewares=museum-monitor-auth
+      - traefik.http.routers.museum-monitor.service=museum-api
+      - traefik.http.middlewares.museum-monitor-auth.basicauth.users=admin:$$2y$$05$$...
 ```
 
-## 5. Nginx + TLS
+## 4. Client build
 
-Order matters: **certificate first, site config second.** The config ships with
-explicit 443 blocks pointing at the cert, so certbot never needs to rewrite it.
-
-```bash
-sudo certbot certonly --nginx -d museumethnofun.com -d api.museumethnofun.com -d www.museumethnofun.com
-
-sudo mkdir -p /var/www/museum
-sudo cp deploy/nginx/museumethnofun.com.conf /etc/nginx/sites-available/
-sudo ln -s ../sites-available/museumethnofun.com.conf /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-`$connection_upgrade` may only be defined once across all enabled sites — if
-another site already defines it, `nginx -t` fails with "duplicate map" and you
-delete the `map` block from the museum config. Check with
-`grep -rn connection_upgrade /etc/nginx/`.
-
-Renewal is a systemd timer installed with the certbot package; confirm with
-`sudo certbot renew --dry-run`. Renewal replaces the certificate files only and
-never edits site configs, so it is safe. Do **not** re-run `certbot --nginx`
-after the site is installed — it appends duplicate 443 server blocks.
-
-### The previous VPS was shared with `qurantv_webrtc` (not the current box)
-
-Two consequences, both already hit once:
-
-- `qurantv_webrtc` holds `listen 80 default_server` and `server_name _`, so it
-  catches every hostname without an explicit block. When certbot ran *before*
-  this site existed, it injected `museumethnofun.com` /
-  `api.museumethnofun.com` server blocks into
-  `/etc/nginx/sites-available/qurantv_webrtc` — serving the QuranTV site on the
-  museum hostnames. Those cloned blocks were removed by hand. If you ever re-run
-  `certbot --nginx` while the museum site is disabled, check that file again.
-- `$connection_upgrade` may only be defined once across all enabled sites. The
-  install script warns if another site already defines it; the map block in the
-  museum config is the one to delete in that case.
-
-```bash
-grep -rn connection_upgrade /etc/nginx/
-sudo grep -n server_name /etc/nginx/sites-available/qurantv_webrtc   # should list only _ and the nip.io name
-```
-
-If you want the monitor panel, create its password file:
-
-```bash
-sudo htpasswd -c /etc/nginx/.htpasswd-museum admin
-```
-…and set `MONITOR_ENABLED=1` in `.env.production`, then `pm2 restart colyseus-app`.
-Both locks are needed — the env var mounts the route, Nginx guards it.
-
-## 6. Client build
-
-In Unity (`6000.3.19f1`): **Museum → Build → WebGL (Production)**, or headless:
+In Unity (`6000.3.19f1`): **Museum → Build → WebGL (Production)**, or headless
+(only with the project closed in the editor):
 
 ```bash
 Unity -quit -batchmode -projectPath . -executeMethod Museum.Build.Editor.BuildWebGL.Production
 ```
 
 The build script forces Brotli compression, "Explicitly Thrown Exceptions Only",
-and flips `ServerConfig.useDevEndpoint` off for the duration of the build, so
-the shipped client points at `wss://api.museumethnofun.com`.
+and flips `ServerConfig.useDevEndpoint` off for the duration of the build, so the
+shipped client points at `ServerConfig.prodEndpoint` = `wss://api.museumethnofun.com`.
+
+**Change the endpoint in the Inspector, never by editing `ServerConfig.asset` on
+disk (2026-09-11).** `BuildWebGL` calls `SetDirty` + `SaveAssets` on the editor's
+in-memory copy — twice, to flip `useDevEndpoint` and to restore it — so an on-disk
+edit made while the project is open is silently overwritten by the next build.
 
 Upload. **Two flags matter, and both were learned the hard way (2026-09-09):**
 
 ```bash
 chmod -R a+rX Builds/WebGL          # every build, not once — see below
 rsync -avz --partial --exclude='.DS_Store' \
-  Builds/WebGL/ <user>@<VPS_IP>:/var/www/museum/
-ssh <host> 'chmod -R a+rX /var/www/museum'
+  Builds/WebGL/ root@<VPS_IP>:/docker/museum/site/
+ssh root@<VPS_IP> 'chmod -R a+rX /docker/museum/site'
 ```
 
-- **`chmod` after *every* build.** Unity writes the `.br` files mode `600`. Nginx
-  runs as `www-data`, cannot read them, and returns its 403 HTML page — which the
-  Unity loader then tries to parse as game data:
-  `Unknown data format (id="<html>\n<head><t")`. This is not a one-time fix to the
-  output folder; a rebuild recreates the files at `600` again. Do it on both ends:
-  locally before sending (`rsync -a` preserves the mode) and on the server after.
-  macOS ships **openrsync**, which has no `--chmod` flag, so this is the only way
-  short of `brew install rsync`.
+- **`chmod` after *every* build.** Unity writes the `.br` files mode `600`. The
+  container's nginx workers run as `nginx`, cannot read them, and return a 403 HTML
+  page — which the Unity loader then tries to parse as game data:
+  `Unknown data format (id="<html>\n<head><t")`. A rebuild recreates the files at
+  `600` again. Do it on both ends: locally before sending (`rsync -a` preserves the
+  mode) and on the server after. macOS ships **openrsync**, which has no `--chmod`
+  flag, so this is the only way short of `brew install rsync`.
 - **No `--delete`.** It removes the old `Build/` files *before* the new ones finish
-  arriving. If the transfer then dies — and a 142 MB payload over a
-  `ControlMaster` session is long enough for that to happen — the site is left
-  with an `index.html` pointing at four files that no longer exist, and every
-  `Build/` request 404s. Upload first; clean up afterwards if you actually need to.
-  Note the payload is *renamed* when built via `BuildWebGL` (`WebGL.data.br`)
-  versus the Build Profile window (`<Product Name>.data.br`), so stale files from
-  the other naming scheme can accumulate — remove those in a separate, deliberate
-  step once the new build is confirmed serving.
+  arriving. If the transfer then dies, the site is left with an `index.html`
+  pointing at files that no longer exist, and every `Build/` request 404s. Upload
+  first; clean up afterwards if you actually need to. Note the payload is
+  *renamed* when built via `BuildWebGL` (`WebGL.data.br`) versus the Build Profile
+  window (`<Product Name>.data.br`), so stale files from the other naming scheme
+  can accumulate — remove those in a separate, deliberate step once the new build
+  is confirmed serving.
 - **`--partial`** keeps what transferred, so a dropped connection resumes instead
-  of restarting 142 MB.
+  of restarting the whole payload.
 
 Verify the upload byte-for-byte rather than trusting the transfer — and **not**
 with `curl --compressed`, which on macOS has no brotli support and silently
@@ -193,7 +161,7 @@ returns an empty body (you will hash `e3b0c442…855`, the SHA-256 of nothing, a
 think the file is wrong):
 
 ```bash
-for f in WebGL.data.br WebGL.wasm.br WebGL.framework.js.br; do
+for f in WebGL.data.br WebGL.wasm.br WebGL.framework.js.br WebGL.loader.js; do
   L=$(shasum -a256 "Builds/WebGL/Build/$f" | awk '{print $1}')
   R=$(curl -s -H 'Accept-Encoding: br' \
         "https://museumethnofun.com/Build/$f" -o - | shasum -a256 | awk '{print $1}')
@@ -201,19 +169,17 @@ for f in WebGL.data.br WebGL.wasm.br WebGL.framework.js.br; do
 done
 ```
 
-The Nginx config declares the right `Content-Encoding` for both Unity naming
-schemes — `*.unityweb` (Decompression Fallback ON) and `*.br` / `*.gz`
-(fallback OFF) — so either build setting works without touching nginx.
-Brotli-compressed builds served without those headers fail with
-`Unable to parse Build/WebGL.data.unityweb`, or hang on the progress bar.
-
-Check a build file's headers after uploading:
+The container's [`nginx.conf`](traefik/nginx.conf) declares `Content-Encoding: br`
+and the right type for `*.data.br`, `*.wasm.br` and `*.js.br` — the layout
+`BuildWebGL` produces (Brotli, Decompression Fallback off). A `*.unityweb` or
+`*.gz` build would need matching blocks added first. Brotli files served without
+those headers fail with `Unable to parse Build/...`, or hang on the progress bar.
 
 ```bash
 curl -sI https://museumethnofun.com/Build/WebGL.wasm.br | grep -i "content-encoding\|content-type"
 ```
 
-## 7. Smoke test
+## 5. Smoke test
 
 1. `https://museumethnofun.com` loads and reaches the main menu.
 2. Browser devtools → Network shows the socket to
@@ -221,24 +187,28 @@ curl -sI https://museumethnofun.com/Build/WebGL.wasm.br | grep -i "content-encod
    or CORS errors in the console.
 3. Two tabs create/join the same room code and see each other.
 4. Play a full Dakon game; refresh mid-game and confirm reconnect.
-5. Leave a room idle for >5 minutes, then move — confirms the long
-   `proxy_read_timeout` is doing its job.
+5. Leave a room idle for >5 minutes, then move. Traefik v3 has a 60 s entrypoint
+   read timeout; an idle game socket was checked to survive 75 s on 2026-09-11,
+   and this step is the full-length check.
 
 ## Redeploy
 
+Server (ends every live match — rooms are in memory):
+
 ```bash
-cd /srv/museum && git pull && npm ci && npm run build && pm2 restart colyseus-app
+sudo -u museum -H bash -lc 'cd /srv/museum && git pull && npm ci \
+  && set -a && . ./.env.production && set +a && npm run db:migrate \
+  && npm run build && pm2 restart colyseus-app'
 ```
 
-Client: rebuild in Unity, rsync again (§6 — `chmod` after the build, no
-`--delete`). `index.html` is sent `no-cache` and the `Build/` files are
-immutable-cached, so a redeploy takes effect on next load.
+Client: rebuild in Unity, upload again (§4 — `chmod` after the build, no
+`--delete`). `index.html` is `no-cache` and `Build/` files are served
+`max-age=0, must-revalidate` with ETags, so a returning browser revalidates
+(cheap 304 when unchanged) and picks up a new build on its next load — no cache
+clearing needed. The loader URLs also carry the build's `?v=` cache buster.
 
-**Test a redeploy in a private window.** `Build/` files carry
-`Cache-Control: public, max-age=31536000, immutable`. A browser that cached a
-broken response — a 403 from the permission trap, or a 404 from a half-finished
-`--delete` — keeps serving it, and Cmd+Shift+R does *not* evict it; that is what
-`immutable` means. Clear via DevTools → Application → Clear site data.
+Refused Dakon drops are logged by the server as `[dakon] refused …` lines in
+`sudo -u museum pm2 logs colyseus-app`.
 
 ## Known constraints
 
@@ -248,9 +218,14 @@ broken response — a 403 from the permission trap, or a 404 from a half-finishe
   as health checks; delete them if you'd rather not expose them.
 - **No LAN fallback yet.** For a venue with unreliable internet, the same build
   runs against a local server; that's a separate setup (see docs/dev-plan.md §6b).
-- **CORS is Colyseus's job, not nginx's.** `@colyseus/core`'s router attaches
+- **CORS is Colyseus's job, not the proxy's.** `@colyseus/core`'s router attaches
   `Access-Control-Allow-Origin` (defaulting to the request Origin) to every
-  matchmaking response and preflight. Adding the same headers in nginx sends two
-  of each and browsers reject the request. To lock the origin down, override
-  `matchMaker.controller.getCorsHeaders` in `src/app.config.ts`.
-- **Dedicated box.** The current VPS (212.85.25.177) hosts only this project; the §5 `qurantv_webrtc` notes are history from the previous one.
+  matchmaking response and preflight. Adding the same headers in Traefik (a
+  `headers` middleware) sends two of each and browsers reject the request. To lock
+  the origin down, override `matchMaker.controller.getCorsHeaders` in
+  `src/app.config.ts`.
+- **Shared Traefik.** The box's Traefik also serves other Hostinger projects;
+  change routes only through the `museum` project's labels.
+- **Previous box.** Until 2026-09-11 the project ran on 101.32.239.188 as
+  `museum.fajrsyauqi.com`, with host nginx + certbot on a VPS shared with
+  `qurantv_webrtc`. None of that setup applies here.

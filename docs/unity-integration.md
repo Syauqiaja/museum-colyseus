@@ -31,7 +31,7 @@ planned:
 | Thing | Value |
 |---|---|
 | WebSocket endpoint | `wss://api.museumethnofun.com` |
-| Client is served from | `https://museumethnofun.com` (same VPS, `/var/www/museum`) |
+| Client is served from | `https://museumethnofun.com` (same VPS, `/docker/museum/site`, nginx container behind Traefik) |
 | Registered room names | `dakon` (2 seats), `egrang` (3 seats, `minPlayers` 2) — both fully implemented; `museum` (presence, up to 50 visitors — see §3) |
 | Room code | 6 chars, alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no I/L/O/0/1) |
 | Join options | `{ private?: bool, displayName?: string (≤32 chars), playerId?: string }` |
@@ -57,14 +57,18 @@ curl -s -X POST https://api.museumethnofun.com/matchmake/joinOrCreate/dakon \
 
 Build and upload:
 
-- Build WebGL with the endpoint constant pointing at `wss://api.museumethnofun.com`
-  (not a subpath of the client host — the Unity SDK has no path setting).
-- Any compression setting works: nginx serves `*.unityweb`, `*.br` and `*.gz`
-  with the correct `Content-Encoding`.
-- Upload replaces the whole webroot:
-  `rsync -avz --delete <BuildFolder>/ ubuntu@101.32.239.188:/var/www/museum/`
-- `index.html` is sent `no-cache` and `Build/` is immutable-cached, so a redeploy
-  takes effect on the next load without a hard refresh.
+- Build WebGL with `ServerConfig.prodEndpoint` = `wss://api.museumethnofun.com`
+  (not a subpath of the client host — the Unity SDK has no path setting). Set it in
+  the Inspector: `BuildWebGL` saves the editor's in-memory `ServerConfig`, so an
+  edit to the `.asset` file on disk is overwritten by the next build.
+- Compression: Brotli with Decompression Fallback off (what `BuildWebGL` produces).
+  The client's nginx serves `*.br` with `Content-Encoding: br`; a `*.unityweb` or
+  `*.gz` build needs matching blocks in `deploy/traefik/nginx.conf` first.
+- Upload (`chmod` every build, no `--delete` — see `deploy/README.md` §4):
+  `chmod -R a+rX <BuildFolder> && rsync -avz --partial <BuildFolder>/ root@212.85.25.177:/docker/museum/site/`
+  then `ssh root@212.85.25.177 'chmod -R a+rX /docker/museum/site'`.
+- `index.html` is sent `no-cache` and `Build/` files `max-age=0, must-revalidate`
+  with ETags, so a redeploy takes effect on the next load without a hard refresh.
 
 ## 3. Exhibition Museum scene
 
