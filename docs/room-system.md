@@ -7,6 +7,11 @@ every game — implemented once in `src/rooms/BaseGameRoom.ts` and subclassed pe
 lifecycle from [architecture.md](architecture.md), message/error contract from
 [protocol.md](protocol.md).
 
+One room is deliberately **not** on this layer: the hub's `museum` presence room
+(`src/rooms/MuseumRoom.ts`) extends `Room` directly, because it has no match to manage —
+no codes, host, seats, start or reconnection. See
+[protocol.md](protocol.md#exhibition-museum-scene).
+
 ## Overview
 
 `BaseGameRoom<S extends BaseGameState>` (abstract) owns everything that isn't

@@ -148,9 +148,13 @@ describe("persistence — players, matches, live seats", function () {
     const finished = new Promise<any>((resolve) => host.onMessage("game_over", resolve));
     for (let drop = 0; drop < 60; drop++) {
       const actor = room.state.activePlayer === host.sessionId ? host : guest;
+      // First own hole not yet sown this turn: v7 lets the player pick, so the test does.
+      const seat = room.state.players.get(actor.sessionId)!.seat;
+      let holeIndex = seat * 10;
+      while (room.state.sownMask & (1 << holeIndex)) holeIndex++;
       actor.send("drop_seed", {
         seedId: room.state.hand[0].id,
-        holeIndex: room.state.nextHoleIndex,
+        holeIndex,
       });
       await room.waitForNextPatch();
     }

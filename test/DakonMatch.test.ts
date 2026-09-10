@@ -41,14 +41,28 @@ describe("DakonRoom — match", () => {
     });
   }
 
+  /** Which seat a session holds: 0 if it opened, 1 otherwise. */
+  function seatOf(state: DakonState, sessionId: string): number {
+    return state.players.get(sessionId)!.seat;
+  }
+
+  /** First hole on the active seat's side that has not taken a seed this turn. */
+  function freeHole(state: DakonState): number {
+    const seat = seatOf(state, state.activePlayer);
+    for (let i = seat * 10; i < seat * 10 + 10; i++) {
+      if ((state.sownMask & (1 << i)) === 0) return i;
+    }
+    assert.fail("no free hole on the active side");
+  }
+
   it("deals a board when the match starts", async () => {
     const { host, room } = await startedMatch();
 
     assert.strictEqual(room.state.phase, "in_progress");
     assert.strictEqual(room.state.holes.length, 20);
-    assert.strictEqual(room.state.centerPoolCount, 45);
-    assert.strictEqual(room.state.hand.length, 15);
-    assert.strictEqual(room.state.nextHoleIndex, 0);
+    assert.strictEqual(room.state.centerPoolCount, 50);
+    assert.strictEqual(room.state.hand.length, 10);
+    assert.strictEqual(room.state.sownMask, 0);
     assert.strictEqual(room.state.activePlayer, host.sessionId, "seat 0 opens");
     assert.strictEqual(room.state.storehouses.size, 2);
 
@@ -61,18 +75,18 @@ describe("DakonRoom — match", () => {
     const { host, guest, room } = await startedMatch();
 
     const seedId = room.state.hand[0].id;
-    const holeIndex = room.state.nextHoleIndex;
+    const holeIndex = 3; // any own hole — the player picks, not the ring
 
     const rejected = nextError(guest);
     guest.send("drop_seed", { seedId, holeIndex });
     assert.strictEqual((await rejected)?.code, "not_your_turn");
-    assert.strictEqual(room.state.hand.length, 15, "nothing moved");
+    assert.strictEqual(room.state.hand.length, 10, "nothing moved");
 
     host.send("drop_seed", { seedId, holeIndex });
     await room.waitForNextPatch();
 
-    assert.strictEqual(room.state.hand.length, 14);
-    assert.strictEqual(room.state.nextHoleIndex, holeIndex + 1);
+    assert.strictEqual(room.state.hand.length, 9);
+    assert.strictEqual(room.state.sownMask, 1 << holeIndex, "the hole is marked taken");
 
     const scored =
       (room.state.storehouses.get(host.sessionId)?.total ?? 0) +
@@ -80,35 +94,42 @@ describe("DakonRoom — match", () => {
     assert.strictEqual(scored, 1, "every drop scores for exactly one side");
   });
 
-  it("refuses a hole out of sequence and a seed not in hand", async () => {
+  it("refuses the opponent's hole, a hole already sown this turn, and a seed not in hand", async () => {
     const { host, room } = await startedMatch();
 
-    const wrongHole = nextError(host);
+    const wrongSide = nextError(host);
+    host.send("drop_seed", { seedId: room.state.hand[0].id, holeIndex: 14 });
+    assert.strictEqual((await wrongSide)?.code, "invalid_hole");
+
     host.send("drop_seed", { seedId: room.state.hand[0].id, holeIndex: 7 });
-    assert.strictEqual((await wrongHole)?.code, "invalid_hole");
+    await room.waitForNextPatch();
+
+    const twice = nextError(host);
+    host.send("drop_seed", { seedId: room.state.hand[0].id, holeIndex: 7 });
+    assert.strictEqual((await twice)?.code, "hole_already_sown");
 
     const noSeed = nextError(host);
-    host.send("drop_seed", { seedId: "not-a-seed", holeIndex: room.state.nextHoleIndex });
+    host.send("drop_seed", { seedId: "not-a-seed", holeIndex: freeHole(room.state) });
     assert.strictEqual((await noSeed)?.code, "seed_not_in_hand");
 
-    assert.strictEqual(room.state.hand.length, 15);
+    assert.strictEqual(room.state.hand.length, 9, "only the one legal drop moved");
   });
 
   it("hands the turn to the other seat when a hand empties", async () => {
     const { host, guest, room } = await startedMatch();
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 10; i++) {
       host.send("drop_seed", {
         seedId: room.state.hand[0].id,
-        holeIndex: room.state.nextHoleIndex,
+        holeIndex: freeHole(room.state),
       });
       await room.waitForNextPatch();
     }
 
     assert.strictEqual(room.state.activePlayer, guest.sessionId);
-    assert.strictEqual(room.state.nextHoleIndex, 10, "seat 1 starts on its own side");
-    assert.strictEqual(room.state.hand.length, 15, "fresh draw");
-    assert.strictEqual(room.state.centerPoolCount, 30);
+    assert.strictEqual(room.state.sownMask, 0, "a fresh turn has no sown holes");
+    assert.strictEqual(room.state.hand.length, 10, "fresh draw");
+    assert.strictEqual(room.state.centerPoolCount, 40);
   });
 
   it("describes every applied drop, the turn-ending one included", async () => {
@@ -117,15 +138,15 @@ describe("DakonRoom — match", () => {
     const applied: any[] = [];
     host.onMessage("drop_applied", (payload: any) => applied.push(payload));
 
-    // The whole first hand. The 15th drop empties it, and the server refills in the same
+    // The whole first hand. The 10th drop empties it, and the server refills in the same
     // call — which is exactly the drop a client cannot see by diffing state patches, because
-    // the patch after it carries a *bigger* hand than the patch before.
+    // the patch after it carries a hand the same size as the patch before.
     const played: string[] = [];
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 10; i++) {
       const seed = room.state.hand[0];
       played.push(seed.id);
       const typeId = seed.typeId;
-      const holeIndex = room.state.nextHoleIndex;
+      const holeIndex = freeHole(room.state);
 
       host.send("drop_seed", { seedId: seed.id, holeIndex });
       await room.waitForNextPatch();
@@ -139,16 +160,16 @@ describe("DakonRoom — match", () => {
       assert.strictEqual(last.gameOver, false);
     }
 
-    assert.strictEqual(applied.length, 15, "one report per drop, none swallowed");
+    assert.strictEqual(applied.length, 10, "one report per drop, none swallowed");
     assert.deepStrictEqual(
       applied.map((d) => d.seedId),
       played,
     );
-    assert.strictEqual(applied[14].turnEnded, true, "the 15th ends the turn");
+    assert.strictEqual(applied[9].turnEnded, true, "the 10th ends the turn");
     assert.strictEqual(
       applied.filter((d) => d.turnEnded).length,
       1,
-      "and only the 15th does",
+      "and only the 10th does",
     );
     assert.strictEqual(room.state.activePlayer, guest.sessionId);
   });
@@ -158,12 +179,12 @@ describe("DakonRoom — match", () => {
 
     const finished = new Promise<any>((resolve) => host.onMessage("game_over", resolve));
 
-    // 60 seeds, 15 per hand → 4 hands, whoever is to act.
+    // 60 seeds, 10 per hand → 6 hands, whoever is to act.
     for (let drop = 0; drop < 60; drop++) {
       const actor = room.state.activePlayer === host.sessionId ? host : guest;
       actor.send("drop_seed", {
         seedId: room.state.hand[0].id,
-        holeIndex: room.state.nextHoleIndex,
+        holeIndex: freeHole(room.state),
       });
       await room.waitForNextPatch();
     }

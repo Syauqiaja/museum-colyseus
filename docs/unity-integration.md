@@ -157,8 +157,8 @@ The Unity client is wired to this server, not to a mock:
   only on a real walkout, and leaves *consented* so the seat frees immediately.
 - **Dakon**: `NetDakonSession` renders `DakonState` and sends `drop_seed`; nothing is drawn
   optimistically, so the board always matches the server. Drops are pipelined — the client
-  predicts `nextHoleIndex + <in flight>` so a player can click a whole hand without waiting
-  a round trip each time.
+  counts a hole with a drop in flight as already sown (`sownMask` plus its own queue) so a
+  player can place a whole hand without waiting a round trip each time.
 - **Egrang**: `NetEgrangSession` drives the race from `step_taken`, `countdown` and
   `game_over` messages rather than schema callbacks. The client grades its own press and
   animates immediately; each `step_taken` either confirms the local stride count or snaps

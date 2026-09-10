@@ -1,6 +1,12 @@
 # Dakon — Rules
 
-**Dakon Edukasi: Digital Edition (Monokotil vs. Dikotil)** — the **v6 ruleset**.
+**Dakon Edukasi: Digital Edition (Monokotil vs. Dikotil)** — the **v7 ruleset**.
+
+> **v7 (2026-09-11)** replaced v6's forced sowing order. The player now chooses the hole
+> as well as the seed, restricted to their own side, one seed per hole per turn; the hand
+> shrank from 15 to 10 so a turn is exactly "fill your ten holes". `nextHoleIndex` in
+> state became `sownMask`, and `hole_already_sown` is a new error. The client changed in
+> the same step (`DakonBoard.cs`, `NetDakonSession.cs`, `DakonView.cs`).
 
 Contract note: rules below are ground truth for room logic. Message/state contract:
 [../protocol.md](../protocol.md#dakon). Server implementation:
@@ -14,7 +20,8 @@ Contract note: rules below are ground truth for room logic. Message/state contra
 > different board: 24 holes, strictly alternating types, 10-seed draws, own-side
 > sowing. That was never implemented on either side and has been dropped. A later
 > draft of *this* board also said 120 seeds and 8 hands; the pool has always been 60
-> in `DakonConfig.ts`, `DakonConfig.cs` and every test — 4 hands, 2 turns each.)
+> in `DakonConfig.ts`, `DakonConfig.cs` and every test — under v6, 4 hands of 15; under
+> v7, 6 hands of 10.)
 
 ## Objective
 
@@ -64,14 +71,18 @@ layout is unaffected — holes are typed by category, and the painted icons are 
 
 ## Turn order
 
-1. **Draw (automatic):** at the start of a turn the server draws 15 random seeds from
+1. **Draw (automatic):** at the start of a turn the server draws 10 random seeds from
    the pool into the active player's hand — or everything left, if fewer remain.
-2. **Sowing:** one seed per hole into consecutive holes, starting at the player's own
-   first hole (seat 0 → hole 0, seat 1 → hole 10) and advancing by one, wrapping
-   around the ring. A full 15-seed hand therefore covers the player's own 10 holes
-   **and spills onto the first 5 holes of the opponent's side** — that is intended.
-3. The player chooses *which* held seed goes into each forced hole. The hole is not a
-   choice; the seed is.
+   `DAKON_DEFAULTS.grabSize` equals `holesPerSide` on purpose: a hand is one side's
+   worth of holes.
+2. **Sowing:** the player picks a held seed **and** one of their **own** holes (seat 0 →
+   holes 0–9, seat 1 → holes 10–19), in any order. A hole takes **one seed per turn**;
+   the set already filled is `sownMask` (bit *i* = hole *i*) and is cleared when the
+   turn passes. Nothing ever lands on the opponent's side.
+3. Both halves are the choice. Because the hand is exactly one side of holes, a turn
+   always ends with every own hole filled; the decision is which seed goes where — and,
+   since a random draw rarely splits 5/5 the way the holes do, which mismatches to give
+   away.
 4. Sowing is sequential: drop, server validates and sweeps, then the next drop.
 
 ## Sowing / capture ("the Sweep")
@@ -88,19 +99,23 @@ two storehouses always sum to 60 at the end.
 
 ## Win condition
 
-The game ends when the centre pool is exhausted and the final hand is sown — 4 hands
-of 15, two turns each. Winner = larger storehouse total. A tie is possible and valid
+The game ends when the centre pool is exhausted and the final hand is sown — 6 hands
+of 10, three turns each. Winner = larger storehouse total. A tie is possible and valid
 (`winner: null`).
 
 ## Edge cases
 
-- **Short final draw:** fewer than 15 seeds left → the hand is whatever remains, and
-  the game ends once it is sown.
-- **Invalid move:** a hole other than the forced next one, a seed not in hand, or a
-  move by the waiting player is rejected with an `error` and changes nothing. Each
+- **Short final draw:** fewer than 10 seeds left → the hand is whatever remains, and
+  the game ends once it is sown. (Never reached with a 60-seed pool; kept for a
+  retuned one.)
+- **Invalid move:** a hole off the board or on the opponent's side (`invalid_hole`), a
+  hole that already took a seed this turn (`hole_already_sown`), a seed not in hand
+  (`seed_not_in_hand`), or a move by the waiting player (`not_your_turn`) is rejected
+  with an `error` and changes nothing — a refused drop does not mark the hole. Each
   refusal is also logged server-side (`[dakon] refused <code> … sent=<hole>
-  expected=<hole> lastAccepted=…`, in `pm2 logs colyseus-app`) — the client only shows a
-  toast, so that line is the record of what it aimed at versus what the engine expected.
+  sown=<mask> lastAccepted=…`, in `pm2 logs colyseus-app`) — the client only shows a
+  toast, so that line is the record of what it aimed at versus which holes were already
+  taken that turn.
 - **Disconnect/reconnect:** hand and sow position are server state and survive a
   reconnect inside the window (30s, `BaseGameRoom`).
 - **Walkout:** a player leaving mid-match ends it; the remaining player is recorded as

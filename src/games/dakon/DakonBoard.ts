@@ -6,7 +6,7 @@ import {
 } from "./DakonConfig.js";
 
 /**
- * Dakon rules engine (v6 ruleset) — plain TypeScript, no Colyseus types.
+ * Dakon rules engine (v7 ruleset) — plain TypeScript, no Colyseus types.
  *
  * Port of the client's `DakonBoard.cs`, which is the ground-truth implementation of
  * the ruleset. Kept free of room/lifecycle concerns so it can be unit-tested
@@ -15,13 +15,16 @@ import {
  * Ruleset in one paragraph: a ring of `holesPerSide * 2` holes, each typed monocot
  * or dicot by the fixed `holeTypes` layout (five of each per side, pinned to the
  * icons painted on the client's board rather than rolled). The active player
- * grabs `grabSize` random seeds from the centre pool and drops them one at a time
- * into consecutive holes, starting at their side's first hole and wrapping around
- * the ring — so a long hand does spill onto the opponent's side. Each drop is swept
- * immediately: seed category matches the hole's type → a point for the dropper,
- * otherwise a point for the opponent. When the hand empties, the turn passes; when
- * the pool is empty too, the game ends and the larger storehouse wins (ties are
- * allowed).
+ * grabs `grabSize` (= `holesPerSide`) random seeds from the centre pool and drops
+ * them one at a time into **their own** holes, choosing both the seed and the hole,
+ * one seed per hole per turn. Each drop is swept immediately: seed category matches
+ * the hole's type → a point for the dropper, otherwise a point for the opponent.
+ * When the hand empties, the turn passes; when the pool is empty too, the game ends
+ * and the larger storehouse wins (ties are allowed).
+ *
+ * v6 sowed into forced consecutive holes wrapping the ring. That made the hole
+ * types decorative — there was never a decision to make — so v7 lets the player
+ * choose, which is the whole point of a board painted with monocot and dicot icons.
  *
  * Determinism: seeded PRNG, so a given seed always produces the same board and
  * draws. The stream is not byte-compatible with C#'s `System.Random` — it does not
@@ -35,7 +38,11 @@ export type { SeedCategory };
 
 export type DakonPhase = "waiting" | "in_progress" | "finished";
 
-export type DakonErrorCode = "not_your_turn" | "invalid_hole" | "seed_not_in_hand";
+export type DakonErrorCode =
+  | "not_your_turn"
+  | "invalid_hole"
+  | "hole_already_sown"
+  | "seed_not_in_hand";
 
 export interface Seed {
   id: string;
@@ -89,6 +96,8 @@ export class DakonBoard {
   private readonly random: () => number;
 
   private holes: SeedCategory[] = [];
+  /** Holes that already took a seed this turn. Cleared when the turn passes. */
+  private sown: boolean[] = [];
   private pool: Seed[] = [];
   private hand: Seed[] = [];
 
@@ -99,7 +108,6 @@ export class DakonBoard {
   ];
 
   private activeSeat = 0;
-  private nextHole = 0;
   private currentPhase: DakonPhase = "waiting";
 
   private monocotCursor = 0;
@@ -114,10 +122,10 @@ export class DakonBoard {
 
   start(): void {
     this.holes = this.holeLayout();
+    this.sown = new Array(this.holes.length).fill(false);
     this.fillPool();
 
     this.activeSeat = 0;
-    this.nextHole = this.startHoleFor(this.activeSeat);
     this.currentPhase = "in_progress";
     this.grabHand();
   }
@@ -176,20 +184,26 @@ export class DakonBoard {
     }
   }
 
-  private startHoleFor(seat: number): number {
-    return seat === 0 ? 0 : this.config.holesPerSide;
+  /** Which seat a ring index belongs to: 0 for the first `holesPerSide`, 1 for the rest. */
+  sideOf(holeIndex: number): number {
+    return holeIndex < this.config.holesPerSide ? 0 : 1;
   }
 
   // --- play ----------------------------------------------------------------
 
   /**
-   * Drop one held seed into the forced next hole. Every rejection is a rule, not
-   * an exception: the caller turns the returned error code into an `error` message.
+   * Drop one held seed into one of the active seat's own, still-empty holes. Every
+   * rejection is a rule, not an exception: the caller turns the returned error code
+   * into an `error` message.
    */
   drop(seat: number, seedId: string, holeIndex: number): DropResult {
     if (this.currentPhase !== "in_progress") return fail("invalid_hole");
     if (seat !== this.activeSeat) return fail("not_your_turn");
-    if (holeIndex !== this.nextHole) return fail("invalid_hole");
+    if (!Number.isInteger(holeIndex) || holeIndex < 0 || holeIndex >= this.holes.length) {
+      return fail("invalid_hole");
+    }
+    if (this.sideOf(holeIndex) !== this.activeSeat) return fail("invalid_hole");
+    if (this.sown[holeIndex]) return fail("hole_already_sown");
 
     const handIndex = this.hand.findIndex((s) => s.id === seedId);
     if (handIndex < 0) return fail("seed_not_in_hand");
@@ -200,7 +214,7 @@ export class DakonBoard {
 
     this.stores[scoringPlayer][seed.category]++;
     this.hand.splice(handIndex, 1);
-    this.nextHole = (this.nextHole + 1) % totalHoles(this.config);
+    this.sown[holeIndex] = true;
 
     const result: DropResult = {
       ok: true,
@@ -213,13 +227,13 @@ export class DakonBoard {
 
     if (this.hand.length === 0) {
       result.turnEnded = true;
+      this.sown.fill(false);
 
       if (this.pool.length === 0) {
         this.currentPhase = "finished";
         result.gameOver = true;
       } else {
         this.activeSeat = 1 - this.activeSeat;
-        this.nextHole = this.startHoleFor(this.activeSeat);
         this.grabHand();
       }
     }
@@ -237,8 +251,21 @@ export class DakonBoard {
     return this.activeSeat;
   }
 
-  get nextHoleIndex(): number {
-    return this.nextHole;
+  /** True once a seed landed in this hole during the current turn. */
+  isSown(holeIndex: number): boolean {
+    return this.sown[holeIndex] === true;
+  }
+
+  /**
+   * The sown holes as a bitmask, bit i = hole i — the shape the state syncs, so the
+   * client reads the same thing it would compute. Twenty holes fit in 32 bits.
+   */
+  get sownMask(): number {
+    let mask = 0;
+    for (let i = 0; i < this.sown.length && i < 32; i++) {
+      if (this.sown[i]) mask |= 1 << i;
+    }
+    return mask >>> 0;
   }
 
   get poolCount(): number {

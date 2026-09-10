@@ -7,7 +7,7 @@
 export type SeedCategory = "monocot" | "dicot";
 
 /**
- * Tunables for a Dakon game. Defaults are the settled **v6 ruleset** values, which
+ * Tunables for a Dakon game. Defaults are the settled **v7 ruleset** values, which
  * are the ones the Unity client implements and has been played against
  * (`Assets/Scripts/Games/Dakon/DakonConfig.cs`). Keep the two in step: the server
  * is authoritative, so a divergence shows up as a client that renders a board the
@@ -18,10 +18,14 @@ export type SeedCategory = "monocot" | "dicot";
  * the shape of a match in both modes.
  */
 export interface DakonConfig {
-  /** Total seeds in the pool. 60 = 30 monocot + 30 dicot → 4 grabs of 15 = 2 turns each. */
+  /** Total seeds in the pool. 60 = 30 monocot + 30 dicot → 6 grabs of 10 = 3 turns each. */
   poolSeeds: number;
 
-  /** Seeds grabbed per turn — takes min(grabSize, poolRemaining). */
+  /**
+   * Seeds grabbed per turn — takes min(grabSize, poolRemaining). Equal to `holesPerSide`
+   * on purpose: a turn is "one seed into each of your own holes", and a hand larger than
+   * the side would have nowhere legal to go.
+   */
   grabSize: number;
 
   /** Holes per player side. The ring is holesPerSide * 2. */
@@ -97,7 +101,7 @@ export const DAKON_HOLE_TYPES: SeedCategory[] = [
 
 export const DAKON_DEFAULTS: DakonConfig = {
   poolSeeds: 60,
-  grabSize: 15,
+  grabSize: 10,
   holesPerSide: 10,
   holeTypes: DAKON_HOLE_TYPES,
   monocotTypeIds: ["beras", "gabah", "alpukat", "zaitun"],

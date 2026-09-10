@@ -19,21 +19,21 @@ Message/state contract per Room, so the Unity client and Colyseus server (built 
 
 Room name: `dakon` (implemented — `DakonRoom` + `src/games/dakon/DakonBoard.ts`). Rules: [games/dakon.md](games/dakon.md). 2 seats, starts when both are in.
 
-The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types fixed by the painted board (`DAKON_HOLE_TYPES`), a 60-seed pool, 15 seeds drawn per turn — 4 hands, 2 turns each.
+The board is the **v7 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types fixed by the painted board (`DAKON_HOLE_TYPES`), a 60-seed pool, 10 seeds drawn per turn — 6 hands, 3 turns each. The player chooses both the seed and the hole; holes are restricted to the active seat's own side and take one seed per turn.
 
 - **State schema** (`DakonState`, on top of the shared `phase` / `hostSessionId` / `players`):
   - `centerPoolCount: number` — seeds still undrawn. The game ends when it hits 0.
   - `holes: string[20]` — each `"monocot" | "dicot"`. Ring order: indices 0–9 = seat 0's side, 10–19 = seat 1's. Fixed for the match, and now fixed *across* matches: it is the constant `DAKON_HOLE_TYPES`, pinned to the icons painted on the client's board (see `docs/games/dakon.md`). Still sent every match rather than assumed — the client renders what it is told. Holes hold no seeds between drops — each drop is swept immediately.
   - `activePlayer: string` — sessionId of the player to act.
-  - `nextHoleIndex: number` — the forced destination of the next drop. Advances by 1 and wraps around the ring, so a 15-seed hand spills onto the opponent's side.
-  - `hand: { id, category, typeId }[]` — the active player's undropped seeds (15, or fewer on the final draw). Public rather than private: simplest authoritative shape, and the client decides what to render for whom. `category` scores; `typeId` is the species (a Unity `SeedType` asset name) and is cosmetic.
+  - `sownMask: number` (uint32) — bit *i* set ⇔ hole *i* has taken a seed this turn. Cleared when the turn passes. Replaced `nextHoleIndex` in v7.
+  - `hand: { id, category, typeId }[]` — the active player's undropped seeds (10, or fewer on the final draw). Public rather than private: simplest authoritative shape, and the client decides what to render for whom. `category` scores; `typeId` is the species (a Unity `SeedType` asset name) and is cosmetic.
   - `storehouses: { [sessionId]: { monocot, dicot, total } }` — scored seeds, split by category because the client renders two bins per side.
 - **Client → server:**
-  - `drop_seed` — `{ seedId: string, holeIndex: number }` — one per message, sequential. `seedId` must be in `hand`; `holeIndex` must equal `nextHoleIndex`. The server validates, applies the sweep (score → clear → advance) and patches state before the next drop is accepted.
+  - `drop_seed` — `{ seedId: string, holeIndex: number }` — one per message, sequential. `seedId` must be in `hand`; `holeIndex` must be an integer on the active seat's side (0–9 for seat 0, 10–19 for seat 1) whose `sownMask` bit is clear. The server validates, applies the sweep (score → clear → advance) and patches state before the next drop is accepted.
   - `start_game` — shared, see above.
 - **Server → client:**
   - State patches after every drop, and after every draw (new `hand`, possibly short).
-  - `error` — `{ code, message }`: `not_your_turn`, `invalid_hole` (not equal to `nextHoleIndex`), `seed_not_in_hand`, plus `invalid_move` for a malformed payload or a drop outside a match.
+  - `error` — `{ code, message }`: `not_your_turn`, `invalid_hole` (off the board or not on the active seat's side), `hole_already_sown` (that hole already took a seed this turn), `seed_not_in_hand`, plus `invalid_move` for a malformed payload or a drop outside a match.
   - `game_over` — `{ scores: { [sessionId]: number }, winner: string | null }` — `null` = tie. Emitted when the pool is exhausted after the final sweep, and also when a player walks out mid-match (the remaining player wins by forfeit).
 
 Board determinism: the shuffle/draw RNG is seeded from the room code, so a match is reproducible from its results row. No client can choose it.
@@ -73,4 +73,22 @@ Nothing about the skill-check bar is simulated server-side: the room stores outc
 
 ## Exhibition Museum scene
 
-No room, no protocol — single-player, client-side only (see [overview.md](overview.md), [architecture.md](architecture.md)). Nothing to define here unless that assumption changes.
+**Room name: `museum`** (`src/rooms/MuseumRoom.ts`). Presence only, added 2026-09-11 so visitors
+see each other walk the hub. It is **not** a `BaseGameRoom`: no phase, no host, no seats, no
+codes, no `start_game`, no reconnection window, nothing persisted. The client only ever
+`joinOrCreate("museum", { displayName })`; rooms fill to `MUSEUM_MAX_VISITORS` (32) and
+matchmaking opens another — visitors in different rooms do not see each other.
+
+- **State** (`MuseumState`, patched every 100 ms):
+  - `visitors: Map<sessionId, MuseumVisitor>` — `{ displayName, x, y, z, yaw }`. `yaw` is
+    degrees in `[0, 360)`. A visitor's row is added on join (`displayName` from the join
+    options, cut to 32 chars) and removed the moment the socket closes.
+- **Client → server:**
+  - `move` — `{ x, y, z, yaw }` — the local player's world position and heading, sent at
+    the client's own cadence (~5 Hz, only when it changed). Copied into the sender's row if
+    every field is finite and the position is within `MUSEUM_BOUNDS` (±200 × ±100 × ±200 m);
+    otherwise **dropped silently** — the hub has no rule to break, so there is no `error`.
+- **Server → client:** nothing besides the schema patch.
+
+The server does not simulate walking. "Authoritative" here means only that it holds the
+single copy of the visitor list everyone reads.

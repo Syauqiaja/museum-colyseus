@@ -10,9 +10,9 @@ import { DakonBoard, type DakonErrorCode } from "../games/dakon/DakonBoard.js";
  * board. The rules live in `DakonBoard` (plain TS, unit-tested without a server) —
  * everything here is translation: message in → engine call → state mirrored out.
  *
- * Seats are the engine's player indices: seat 0 sows from hole 0, seat 1 from the
- * middle of the ring. `drop_seed` is the only client input, and it is validated by
- * the engine, never trusted (docs/boundaries.md).
+ * Seats are the engine's player indices: seat 0 owns holes 0–9, seat 1 holes 10–19.
+ * `drop_seed` is the only client input, and it is validated by the engine, never
+ * trusted (docs/boundaries.md).
  */
 export class DakonRoom extends BaseGameRoom<DakonState> {
   maxClients = 2;
@@ -104,7 +104,7 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
     const species = board.currentHand.find((s) => s.id === seedId)?.typeId ?? "";
 
     // Captured before the drop so a refusal can be logged against the board it was judged on.
-    const expectedHole = board.nextHoleIndex;
+    const sownMask = board.sownMask;
     const activeSeat = board.activePlayer;
 
     const result = board.drop(seat, seedId, holeIndex);
@@ -115,7 +115,7 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
         activeSeat,
         seedId,
         sentHole: holeIndex,
-        expectedHole,
+        sownMask,
         seedInHand: species !== "",
         handSize: board.currentHand.length,
       });
@@ -150,7 +150,7 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
     const board = this.board!;
 
     this.state.centerPoolCount = board.poolCount;
-    this.state.nextHoleIndex = board.nextHoleIndex;
+    this.state.sownMask = board.sownMask;
     this.state.activePlayer = this.seats[board.activePlayer] ?? "";
 
     this.state.hand.clear();
@@ -200,8 +200,8 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
 
   /**
    * One line per refused drop. A refusal is silent server-side otherwise — the client only
-   * shows a toast — so this is the only record of what the client aimed at versus what the
-   * engine expected, and how long after the previous accepted drop it arrived.
+   * shows a toast — so this is the only record of what the client aimed at versus which holes
+   * had already taken a seed this turn, and how long after the previous accepted drop it arrived.
    */
   private logRefusal(
     code: DakonErrorCode,
@@ -210,7 +210,7 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
       activeSeat: number;
       seedId: string;
       sentHole: number;
-      expectedHole: number;
+      sownMask: number;
       seedInHand: boolean;
       handSize: number;
     },
@@ -219,7 +219,7 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
     console.warn(
       `[dakon] refused ${code} room=${this.roomId} seat=${detail.seat} active=${detail.activeSeat} ` +
         `seed=${detail.seedId} inHand=${detail.seedInHand} hand=${detail.handSize} ` +
-        `sent=${detail.sentHole} expected=${detail.expectedHole} ` +
+        `sent=${detail.sentHole} sown=0x${detail.sownMask.toString(16)} ` +
         (last
           ? `lastAccepted=seat${last.seat}@${last.holeIndex} ${Date.now() - last.at}ms ago`
           : "lastAccepted=none"),
@@ -232,8 +232,10 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
         return "It is not your turn.";
       case "seed_not_in_hand":
         return "That seed is not in your hand.";
+      case "hole_already_sown":
+        return "That hole already took a seed this turn.";
       default:
-        return "That hole is not the next one in the sequence.";
+        return "Drop into one of your own holes.";
     }
   }
 

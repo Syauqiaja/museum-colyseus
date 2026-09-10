@@ -16,7 +16,7 @@ export class DakonStore extends Schema {
 }
 
 /**
- * Dakon (Congklak) synced state — the v6 ruleset, mirroring the client's
+ * Dakon (Congklak) synced state — the v7 ruleset, mirroring the client's
  * `DakonBoard.cs`. See docs/games/dakon.md and docs/protocol.md#dakon.
  *
  * The hand is public rather than visible only to the active player: it is the
@@ -34,8 +34,12 @@ export class DakonState extends BaseGameState {
   /** sessionId of the player whose turn it is. Empty until the match starts. */
   @type("string") activePlayer: string = "";
 
-  /** Forced destination of the next drop — the client highlights it. */
-  @type("uint8") nextHoleIndex: number = 0;
+  /**
+   * Holes that already took a seed this turn, as a bitmask (bit i = ring index i). The
+   * client greys them out; the server refuses a second seed into one. Cleared when the
+   * turn passes.
+   */
+  @type("uint32") sownMask: number = 0;
 
   /** The active player's undropped seeds, in draw order. */
   @type([DakonSeed]) hand = new ArraySchema<DakonSeed>();
