@@ -97,7 +97,10 @@ of 15, two turns each. Winner = larger storehouse total. A tie is possible and v
 - **Short final draw:** fewer than 15 seeds left → the hand is whatever remains, and
   the game ends once it is sown.
 - **Invalid move:** a hole other than the forced next one, a seed not in hand, or a
-  move by the waiting player is rejected with an `error` and changes nothing.
+  move by the waiting player is rejected with an `error` and changes nothing. Each
+  refusal is also logged server-side (`[dakon] refused <code> … sent=<hole>
+  expected=<hole> lastAccepted=…`, in `pm2 logs colyseus-app`) — the client only shows a
+  toast, so that line is the record of what it aimed at versus what the engine expected.
 - **Disconnect/reconnect:** hand and sow position are server state and survive a
   reconnect inside the window (30s, `BaseGameRoom`).
 - **Walkout:** a player leaving mid-match ends it; the remaining player is recorded as

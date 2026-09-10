@@ -19,7 +19,7 @@ Message/state contract per Room, so the Unity client and Colyseus server (built 
 
 Room name: `dakon` (implemented — `DakonRoom` + `src/games/dakon/DakonBoard.ts`). Rules: [games/dakon.md](games/dakon.md). 2 seats, starts when both are in.
 
-The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types shuffled per side, a 60-seed pool, 15 seeds drawn per turn — 4 hands, 2 turns each.
+The board is the **v6 ruleset**, the one the Unity client implements: a 20-hole ring (10 per side), types fixed by the painted board (`DAKON_HOLE_TYPES`), a 60-seed pool, 15 seeds drawn per turn — 4 hands, 2 turns each.
 
 - **State schema** (`DakonState`, on top of the shared `phase` / `hostSessionId` / `players`):
   - `centerPoolCount: number` — seeds still undrawn. The game ends when it hits 0.

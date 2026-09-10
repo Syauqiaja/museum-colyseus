@@ -23,6 +23,9 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
   /** sessionId by seat index, fixed at start so a mid-match leave can't reshuffle sides. */
   private seats: string[] = [];
 
+  /** The last drop the engine accepted — context for a refusal log line. */
+  private lastAccepted?: { seat: number; holeIndex: number; at: number };
+
   messages = {
     drop_seed: function (this: DakonRoom, client: Client, message: any) {
       this.handleDrop(client, message);
@@ -100,13 +103,27 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
     // client's cue for which 3D seed to throw, and by the time we have a result it is gone.
     const species = board.currentHand.find((s) => s.id === seedId)?.typeId ?? "";
 
+    // Captured before the drop so a refusal can be logged against the board it was judged on.
+    const expectedHole = board.nextHoleIndex;
+    const activeSeat = board.activePlayer;
+
     const result = board.drop(seat, seedId, holeIndex);
 
     if (!result.ok) {
+      this.logRefusal(result.error!, {
+        seat,
+        activeSeat,
+        seedId,
+        sentHole: holeIndex,
+        expectedHole,
+        seedInHand: species !== "",
+        handSize: board.currentHand.length,
+      });
       this.sendError(client, result.error!, this.errorMessage(result.error!));
       return;
     }
 
+    this.lastAccepted = { seat, holeIndex, at: Date.now() };
     this.syncBoard();
 
     // State says what the board *is*; this says what just happened, which is what an
@@ -179,6 +196,34 @@ export class DakonRoom extends BaseGameRoom<DakonState> {
       scores,
       winner: winnerSeat === null ? null : (this.seats[winnerSeat] ?? null),
     });
+  }
+
+  /**
+   * One line per refused drop. A refusal is silent server-side otherwise — the client only
+   * shows a toast — so this is the only record of what the client aimed at versus what the
+   * engine expected, and how long after the previous accepted drop it arrived.
+   */
+  private logRefusal(
+    code: DakonErrorCode,
+    detail: {
+      seat: number;
+      activeSeat: number;
+      seedId: string;
+      sentHole: number;
+      expectedHole: number;
+      seedInHand: boolean;
+      handSize: number;
+    },
+  ): void {
+    const last = this.lastAccepted;
+    console.warn(
+      `[dakon] refused ${code} room=${this.roomId} seat=${detail.seat} active=${detail.activeSeat} ` +
+        `seed=${detail.seedId} inHand=${detail.seedInHand} hand=${detail.handSize} ` +
+        `sent=${detail.sentHole} expected=${detail.expectedHole} ` +
+        (last
+          ? `lastAccepted=seat${last.seat}@${last.holeIndex} ${Date.now() - last.at}ms ago`
+          : "lastAccepted=none"),
+    );
   }
 
   private errorMessage(code: DakonErrorCode): string {
