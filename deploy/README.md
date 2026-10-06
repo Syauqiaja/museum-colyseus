@@ -4,7 +4,7 @@ One VPS (212.85.25.177, Hostinger) serves both halves of the project:
 
 | Host | Serves | Backed by |
 |---|---|---|
-| `museumethnofun.com` (`www` → apex) | Unity WebGL client | `web` container (`nginx:alpine`) serving `/docker/museum/site` |
+| `museumethnofun.com` (`www` → apex) | Unity WebGL client, plus the museum's 16 videos at `/videos/` | `web` container (`nginx:alpine`) serving `/docker/museum/site` (videos in `site/videos/`, not part of the build — never `--delete` the site) |
 | `api.museumethnofun.com` | Colyseus rooms + matchmaking | Node under PM2 **on the host**, `127.0.0.1:2567` |
 
 **Ports 80/443 belong to Traefik**, not to anything this repo installs. Hostinger's
@@ -193,7 +193,16 @@ curl -sI https://museumethnofun.com/Build/WebGL.wasm.br | grep -i "content-encod
 
 ## Redeploy
 
-Server (ends every live match — rooms are in memory):
+Scripted, from a laptop: `deploy/deploy.sh` (add `-y` to skip the prompt). It refuses
+unless the local HEAD is exactly `origin/main` with a clean tree — the box pulls from
+GitHub, so unpushed work would silently not ship — runs `npm test`, shows the commits
+about to go out, asks before restarting, runs the steps below over ssh as
+`root@212.85.25.177` (`DEPLOY_USER` / `DEPLOY_HOST` to override; one shared connection,
+so one passphrase/password prompt per run), and polls `/hi` until it answers. The Unity
+client has its own `./deploy.sh` in its repo; deploy the server first when a release
+touches both.
+
+By hand, on the box. Server (ends every live match — rooms are in memory):
 
 ```bash
 sudo -u museum -H bash -lc 'cd /srv/museum && git pull && npm ci \

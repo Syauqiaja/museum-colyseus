@@ -14,6 +14,23 @@ npm test          # mocha test suite
 npm run loadtest   # scripted concurrent-client load test
 ```
 
+## Deploy
+
+```
+deploy/deploy.sh      # redeploy production from origin/main (asks before restarting)
+deploy/deploy.sh -y   # no prompt
+```
+
+What you need:
+
+- `bash`, `git`, `ssh`, `curl`, and Node.js >= 20.9 (the script runs `npm test` locally first).
+- SSH access to the VPS as `root@212.85.25.177` (key or password). You are asked to authenticate once per run. Use `DEPLOY_USER` / `DEPLOY_HOST` to deploy as another user or to another box. The user must be able to `sudo -u museum`.
+- Your changes committed and pushed. The VPS pulls `main` from GitHub, so the script refuses to run unless your local tree is clean and on exactly `origin/main`.
+
+What it does: runs the tests, shows the commits about to go out, asks before restarting (**a restart ends every live match**, so deploy when the museum is closed), then on the VPS pulls, installs, migrates the database, builds, restarts PM2, and waits for `https://api.museumethnofun.com/hi` to answer. If the server is already on `origin/main` it does nothing.
+
+The Unity client deploys separately with `./deploy.sh` in its own repo. When a release touches both, deploy the server first. Full runbook: [`deploy/README.md`](deploy/README.md).
+
 ## Structure
 
 - `src/index.ts` — entry point
